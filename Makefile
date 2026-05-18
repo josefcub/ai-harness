@@ -1,7 +1,11 @@
 SRC := ./src
 BIN := ./bin
 
-.PHONY: all build client test vet fmt race clean
+Package := ./...
+
+_RUN_TEST = mkdir -p test-output && cd $(SRC) && go test -v -count=1 -run=$(Test) $(Package) -coverprofile=../test-output/single-$(Test).cover.out
+
+.PHONY: all build client test vet race fmt clean test-one coverage-one
 
 all: build client
 
@@ -11,11 +15,14 @@ build:
 client:
 	cd $(SRC) && go build -o ../$(BIN)/client ./cmd/client
 
-test:
-	cd $(SRC) && go test ./...
+test: vet
+	cd $(SRC) && go test -count=1 ./...
 
 vet:
-	cd $(SRC) && go vet ./...
+	@cd $(SRC) && go vet ./...
+
+race: fmt vet
+	cd $(SRC) && go test -race -count=1 ./...
 
 fmt:
 	@UNFORMATTED=$$(cd $(SRC) && gofmt -l .); \
@@ -25,8 +32,12 @@ fmt:
 		exit 1; \
 	fi
 
-race:
-	cd $(SRC) && go test -race ./...
-
 clean:
 	rm -f $(BIN)/runtime && rm -f $(BIN)/client && cd $(SRC) && go clean . && go clean ./cmd/client && go clean -cache 
+
+test-one:
+	${_RUN_TEST}
+
+coverage-one:
+	${_RUN_TEST}
+	cd $(SRC) && go run ./cmd/tools/coverage/ ../test-output/single-$(Test).cover.out . $(Package)
