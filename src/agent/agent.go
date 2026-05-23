@@ -102,42 +102,22 @@ func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText,
 				logger.Error("LLM call failed", "error", err.Error())
 			}
 
-			// If we got a partial response, record it in the session so the
-			// content is not lost. Do not attempt tool execution.
+			// Accumulate partial response content into session and output buffer
 			if resp != nil {
 				sess.Messages = append(sess.Messages, session.ConversationMessage{
 					Role:             session.RoleAssistant,
 					Content:          resp.Content,
 					ReasoningContent: resp.ReasoningContent,
 				})
-				// Accumulate into callback output
-				if resp.ReasoningContent != "" {
-					output.WriteString("[Reasoning: " + resp.ReasoningContent + "]\n")
-				}
-				if resp.Content != "" {
-					output.WriteString(resp.Content)
-				}
+				a.accumulateOutput(resp, &output, false, logger)
 				return output.String(), fmt.Errorf("LLM call interrupted (iteration %d, partial response saved): %w", i+1, err)
 			}
 
 			return output.String(), fmt.Errorf("LLM call failed (iteration %d): %w", i+1, err)
 		}
 
-		// Log and accumulate agent reasoning content
-		if resp.ReasoningContent != "" {
-			if a.logAgentReasoning && logger != nil {
-				logger.Debug("agent reasoning", "content", resp.ReasoningContent)
-			}
-			output.WriteString("[Reasoning: " + resp.ReasoningContent + "]\n")
-		}
-
-		// Log and accumulate agent text content
-		if resp.Content != "" {
-			if a.logAgentReasoning && logger != nil {
-				logger.Debug("agent response", "content", resp.Content)
-			}
-			output.WriteString(resp.Content)
-		}
+		// Log and accumulate agent response
+		a.accumulateOutput(resp, &output, a.logAgentReasoning, logger)
 
 		// If no tool calls, record the final assistant message and we're done
 		if len(resp.ToolCalls) == 0 {
@@ -154,21 +134,11 @@ func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText,
 		}
 
 		// Record assistant message with tool calls on session
-		var sessTCs []session.ToolCall
-		for _, tc := range resp.ToolCalls {
-			stc := session.ToolCall{
-				ID:   tc.ID,
-				Type: tc.Type,
-			}
-			stc.Function.Name = tc.Function.Name
-			stc.Function.Arguments = tc.Function.Arguments
-			sessTCs = append(sessTCs, stc)
-		}
 		sess.Messages = append(sess.Messages, session.ConversationMessage{
 			Role:             session.RoleAssistant,
 			Content:          resp.Content,
 			ReasoningContent: resp.ReasoningContent,
-			ToolCalls:        sessTCs,
+			ToolCalls:        convertLLMToolCalls(resp.ToolCalls),
 		})
 
 		// Execute each tool call
@@ -230,6 +200,58 @@ func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText,
 	}
 
 	return output.String(), nil
+}
+
+// accumulateOutput writes reasoning content and text content from a response
+// into the output buffer. When logReasoning is true and logger is non-nil, it
+// also emits debug logs for both fields.
+func (a *Agent) accumulateOutput(resp *llm.ChatResponse, output *strings.Builder, logReasoning bool, logger *log.Logger) {
+	if resp.ReasoningContent != "" {
+		if logReasoning && logger != nil {
+			logger.Debug("agent reasoning", "content", resp.ReasoningContent)
+		}
+		output.WriteString("[Reasoning: " + resp.ReasoningContent + "]\n")
+	}
+	if resp.Content != "" {
+		if logReasoning && logger != nil {
+			logger.Debug("agent response", "content", resp.Content)
+		}
+		output.WriteString(resp.Content)
+	}
+}
+
+// convertLLMToolCalls converts a slice of LLM tool calls to session tool calls.
+func convertLLMToolCalls(tcs []llm.ToolCall) []session.ToolCall {
+	if len(tcs) == 0 {
+		return nil
+	}
+	sessTCs := make([]session.ToolCall, 0, len(tcs))
+	for _, tc := range tcs {
+		sessTCs = append(sessTCs, session.ToolCall{
+			ID:   tc.ID,
+			Type: tc.Type,
+		})
+		sessTCs[len(sessTCs)-1].Function.Name = tc.Function.Name
+		sessTCs[len(sessTCs)-1].Function.Arguments = tc.Function.Arguments
+	}
+	return sessTCs
+}
+
+// convertSessionToolCalls converts a slice of session tool calls to LLM tool calls.
+func convertSessionToolCalls(tcs []session.ToolCall) []llm.ToolCall {
+	if len(tcs) == 0 {
+		return nil
+	}
+	llmTCs := make([]llm.ToolCall, 0, len(tcs))
+	for _, tc := range tcs {
+		llmTCs = append(llmTCs, llm.ToolCall{
+			ID:   tc.ID,
+			Type: tc.Type,
+		})
+		llmTCs[len(llmTCs)-1].Function.Name = tc.Function.Name
+		llmTCs[len(llmTCs)-1].Function.Arguments = tc.Function.Arguments
+	}
+	return llmTCs
 }
 
 // summarizeIfNeeded checks whether context is approaching the limit and triggers
@@ -463,15 +485,7 @@ func (a *Agent) convertMessage(msg session.ConversationMessage) llm.Message {
 	llmMsg.ReasoningContent = msg.ReasoningContent
 
 	if len(msg.ToolCalls) > 0 {
-		for _, tc := range msg.ToolCalls {
-			llmTC := llm.ToolCall{
-				ID:   tc.ID,
-				Type: tc.Type,
-			}
-			llmTC.Function.Name = tc.Function.Name
-			llmTC.Function.Arguments = tc.Function.Arguments
-			llmMsg.ToolCalls = append(llmMsg.ToolCalls, llmTC)
-		}
+		llmMsg.ToolCalls = convertSessionToolCalls(msg.ToolCalls)
 	}
 
 	if msg.ToolCallID != "" {
@@ -509,15 +523,7 @@ func (a *Agent) toMultimodalMessage(msg session.ConversationMessage) llm.Message
 	}
 
 	if len(msg.ToolCalls) > 0 {
-		for _, tc := range msg.ToolCalls {
-			llmTC := llm.ToolCall{
-				ID:   tc.ID,
-				Type: tc.Type,
-			}
-			llmTC.Function.Name = tc.Function.Name
-			llmTC.Function.Arguments = tc.Function.Arguments
-			llmMsg.ToolCalls = append(llmMsg.ToolCalls, llmTC)
-		}
+		llmMsg.ToolCalls = convertSessionToolCalls(msg.ToolCalls)
 	}
 
 	if msg.ToolCallID != "" {

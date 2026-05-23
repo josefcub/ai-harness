@@ -778,3 +778,717 @@ func TestProcessWithImageAttachment(t *testing.T) {
 		t.Errorf("expected second part type 'image_url', got %v", parts[1]["type"])
 	}
 }
+
+// --- New behavioral tests for Process() ---
+
+func TestProcessReasoningContentRecordedInSession(t *testing.T) {
+	mc := newMockClient()
+	mc.QueueResponse(&llm.ChatResponse{
+		Content:          "The answer is 42.",
+		ReasoningContent: "I calculated this by adding 20 and 22.",
+		ToolCalls:        nil,
+	})
+
+	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	sess := &session.Session{ChannelID: "test", Messages: nil}
+
+	_, err := agent.Process(context.Background(), sess, "What is 20+22?", "You are helpful.", session.ImageAttachment{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// Session should have: user + assistant
+	if len(sess.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(sess.Messages))
+	}
+
+	// Assistant message should have ReasoningContent recorded
+	assistant := sess.Messages[1]
+	if assistant.Role != session.RoleAssistant {
+		t.Errorf("expected role=assistant, got %s", assistant.Role)
+	}
+	if assistant.Content != "The answer is 42." {
+		t.Errorf("expected content 'The answer is 42.', got %q", assistant.Content)
+	}
+	if assistant.ReasoningContent != "I calculated this by adding 20 and 22." {
+		t.Errorf("expected reasoning 'I calculated this by adding 20 and 22.', got %q", assistant.ReasoningContent)
+	}
+	if len(assistant.ToolCalls) != 0 {
+		t.Errorf("expected no tool calls, got %d", len(assistant.ToolCalls))
+	}
+}
+
+func TestProcessReasoningOnlyResponse(t *testing.T) {
+	mc := newMockClient()
+	mc.QueueResponse(&llm.ChatResponse{
+		Content:          "",
+		ReasoningContent: "After careful analysis, the answer is 42.",
+		ToolCalls:        nil,
+	})
+
+	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	sess := &session.Session{ChannelID: "test", Messages: nil}
+
+	output, err := agent.Process(context.Background(), sess, "Think about it", "You are helpful.", session.ImageAttachment{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// Output should contain reasoning with prefix
+	expected := "[Reasoning: After careful analysis, the answer is 42.]\n"
+	if output != expected {
+		t.Errorf("expected %q, got %q", expected, output)
+	}
+
+	// Session should have assistant with reasoning but empty content
+	assistant := sess.Messages[1]
+	if assistant.Role != session.RoleAssistant {
+		t.Errorf("expected role=assistant, got %s", assistant.Role)
+	}
+	if assistant.Content != "" {
+		t.Errorf("expected empty content, got %q", assistant.Content)
+	}
+	if assistant.ReasoningContent != "After careful analysis, the answer is 42." {
+		t.Errorf("expected reasoning content, got %q", assistant.ReasoningContent)
+	}
+}
+
+func TestProcessReasoningOutputFormat(t *testing.T) {
+	mc := newMockClient()
+	mc.QueueResponse(&llm.ChatResponse{
+		Content:          "Final answer.",
+		ReasoningContent: "Step 1: think. Step 2: conclude.",
+		ToolCalls:        nil,
+	})
+
+	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	sess := &session.Session{ChannelID: "test", Messages: nil}
+
+	output, err := agent.Process(context.Background(), sess, "Question", "You are helpful.", session.ImageAttachment{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// Reasoning prefix format: [Reasoning: ...]\n
+	if !strings.HasPrefix(output, "[Reasoning: Step 1: think. Step 2: conclude.]\n") {
+		t.Errorf("expected reasoning prefix format, got: %q", output)
+	}
+	if !strings.HasSuffix(output, "Final answer.") {
+		t.Errorf("expected content at end, got: %q", output)
+	}
+}
+
+func TestProcessMultipleDifferentToolCalls(t *testing.T) {
+	tmpDir := t.TempDir()
+	reg := tools.New(tmpDir)
+
+	// Register two different tools
+	reg.Register("echo", "Echo back input", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"text": map[string]interface{}{"type": "string"},
+		},
+	}, func(args map[string]interface{}) (string, error) {
+		if text, ok := args["text"].(string); ok {
+			return text, nil
+		}
+		return "", fmt.Errorf("missing text")
+	})
+
+	reg.Register("upper", "Convert to uppercase", map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"text": map[string]interface{}{"type": "string"},
+		},
+	}, func(args map[string]interface{}) (string, error) {
+		if text, ok := args["text"].(string); ok {
+			return strings.ToUpper(text), nil
+		}
+		return "", fmt.Errorf("missing text")
+	})
+
+	mc := newMockClient()
+
+	// First call: LLM calls both echo and upper
+	resp1 := &llm.ChatResponse{
+		Content: "",
+		ToolCalls: []llm.ToolCall{
+			{ID: "call_echo", Type: "function"},
+			{ID: "call_upper", Type: "function"},
+		},
+	}
+	resp1.ToolCalls[0].Function.Name = "echo"
+	resp1.ToolCalls[0].Function.Arguments = `{"text":"hello"}`
+	resp1.ToolCalls[1].Function.Name = "upper"
+	resp1.ToolCalls[1].Function.Arguments = `{"text":"world"}`
+	mc.QueueResponse(resp1)
+
+	// Second call: LLM gives final answer
+	mc.QueueResponse(&llm.ChatResponse{
+		Content:   "Echoed: hello, Uppercased: WORLD",
+		ToolCalls: nil,
+	})
+
+	agent := New(mc, reg, 20, 8192, 0.70, 10, 4096, "Summarize.", true, true, nil, nil)
+	sess := &session.Session{ChannelID: "test", Messages: nil}
+
+	output, err := agent.Process(context.Background(), sess, "Use both tools", "You are helpful.", session.ImageAttachment{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// Both tool calls should appear in output
+	if !strings.Contains(output, "[Tool Call: echo]") {
+		t.Errorf("missing echo tool call in output: %s", output)
+	}
+	if !strings.Contains(output, "[Tool Call: upper]") {
+		t.Errorf("missing upper tool call in output: %s", output)
+	}
+	if !strings.Contains(output, "[Result: hello]") {
+		t.Errorf("missing echo result in output: %s", output)
+	}
+	if !strings.Contains(output, "[Result: WORLD]") {
+		t.Errorf("missing upper result in output: %s", output)
+	}
+	if !strings.Contains(output, "Echoed: hello, Uppercased: WORLD") {
+		t.Errorf("missing final answer in output: %s", output)
+	}
+
+	// Session should have: user + assistant(tool_calls) + tool_result(echo) + tool_result(upper) + assistant(final) = 5
+	if len(sess.Messages) != 5 {
+		t.Errorf("expected 5 messages, got %d", len(sess.Messages))
+		for i, m := range sess.Messages {
+			t.Logf("  msg[%d]: role=%s content=%q toolCalls=%d", i, m.Role, m.Content, len(m.ToolCalls))
+		}
+	}
+
+	// Verify tool call IDs are preserved in session
+	assistantWithTools := sess.Messages[1]
+	if len(assistantWithTools.ToolCalls) != 2 {
+		t.Fatalf("expected 2 tool calls in assistant message, got %d", len(assistantWithTools.ToolCalls))
+	}
+	if assistantWithTools.ToolCalls[0].ID != "call_echo" {
+		t.Errorf("expected first tool call ID 'call_echo', got %q", assistantWithTools.ToolCalls[0].ID)
+	}
+	if assistantWithTools.ToolCalls[1].ID != "call_upper" {
+		t.Errorf("expected second tool call ID 'call_upper', got %q", assistantWithTools.ToolCalls[1].ID)
+	}
+
+	// Verify tool results reference the correct tool call IDs
+	if sess.Messages[2].ToolCallID != "call_echo" {
+		t.Errorf("expected tool result call_echo, got %q", sess.Messages[2].ToolCallID)
+	}
+	if sess.Messages[3].ToolCallID != "call_upper" {
+		t.Errorf("expected tool result call_upper, got %q", sess.Messages[3].ToolCallID)
+	}
+}
+
+func TestProcessImageAttachmentWithToolCall(t *testing.T) {
+	mc := newMockClient()
+
+	// First call: LLM sees image and calls a tool
+	resp1 := &llm.ChatResponse{
+		Content: "",
+		ToolCalls: []llm.ToolCall{
+			{ID: "call_1", Type: "function"},
+		},
+	}
+	resp1.ToolCalls[0].Function.Name = "echo"
+	resp1.ToolCalls[0].Function.Arguments = `{"text":"described"}`
+	mc.QueueResponse(resp1)
+
+	// Second call: LLM gives final answer
+	mc.QueueResponse(&llm.ChatResponse{
+		Content:   "I see a cat and described it.",
+		ToolCalls: nil,
+	})
+
+	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	sess := &session.Session{ChannelID: "test", Messages: nil}
+
+	att := session.ImageAttachment{Data: "iVBORw0KGgo=", MIMEType: "image/png"}
+	_, err := agent.Process(context.Background(), sess, "what is this?", "You are helpful.", att)
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// User message should have the attachment
+	if len(sess.Messages[0].Attachments) != 1 {
+		t.Fatalf("expected 1 attachment on user message, got %d", len(sess.Messages[0].Attachments))
+	}
+
+	// Verify the LLM received a multimodal message (content is JSON array)
+	lastMsgs := mc.LastMessages()
+	var parts []map[string]interface{}
+	if err := json.Unmarshal(lastMsgs[1].Content, &parts); err != nil {
+		t.Fatalf("expected multimodal content, got: %s", string(lastMsgs[1].Content))
+	}
+	if len(parts) != 2 {
+		t.Errorf("expected 2 content parts (text + image), got %d", len(parts))
+	}
+	if parts[0]["type"] != "text" || parts[0]["text"] != "what is this?" {
+		t.Errorf("expected text part, got %v", parts[0])
+	}
+	if parts[1]["type"] != "image_url" {
+		t.Errorf("expected image_url part, got %v", parts[1])
+	}
+
+	// Session should have: user(attached) + assistant(tool_call) + tool + assistant(final) = 4
+	if len(sess.Messages) != 4 {
+		t.Errorf("expected 4 messages, got %d", len(sess.Messages))
+	}
+}
+
+func TestProcessReasoningPreservedAfterToolLoop(t *testing.T) {
+	mc := newMockClient()
+
+	// First call: LLM calls a tool, includes reasoning
+	echoTC := llm.ToolCall{ID: "call_1", Type: "function"}
+	echoTC.Function.Name = "echo"
+	echoTC.Function.Arguments = `{"text":"hello"}`
+	mc.QueueResponse(&llm.ChatResponse{
+		Content:          "",
+		ReasoningContent: "I should echo the input first.",
+		ToolCalls:        []llm.ToolCall{echoTC},
+	})
+
+	// Second call: LLM gives final answer with reasoning
+	mc.QueueResponse(&llm.ChatResponse{
+		Content:          "Done.",
+		ReasoningContent: "The echo was successful.",
+		ToolCalls:        nil,
+	})
+
+	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	sess := &session.Session{ChannelID: "test", Messages: nil}
+
+	output, err := agent.Process(context.Background(), sess, "Echo hello", "You are helpful.", session.ImageAttachment{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// First assistant message (with tool call) should preserve reasoning
+	assistantWithTools := sess.Messages[1]
+	if assistantWithTools.ReasoningContent != "I should echo the input first." {
+		t.Errorf("expected reasoning preserved in tool-call assistant msg, got %q", assistantWithTools.ReasoningContent)
+	}
+
+	// Final assistant message should also preserve reasoning
+	finalAssistant := sess.Messages[3]
+	if finalAssistant.ReasoningContent != "The echo was successful." {
+		t.Errorf("expected reasoning preserved in final assistant msg, got %q", finalAssistant.ReasoningContent)
+	}
+	if finalAssistant.Content != "Done." {
+		t.Errorf("expected content 'Done.', got %q", finalAssistant.Content)
+	}
+
+	// Output should contain both reasoning blocks
+	if !strings.Contains(output, "[Reasoning: I should echo the input first.]") {
+		t.Errorf("expected first reasoning in output: %s", output)
+	}
+	if !strings.Contains(output, "[Reasoning: The echo was successful.]") {
+		t.Errorf("expected second reasoning in output: %s", output)
+	}
+}
+
+// --- Tests for convertLLMToolCalls helper ---
+
+func TestConvertLLMToolCallsEmpty(t *testing.T) {
+	result := convertLLMToolCalls(nil)
+	if result != nil {
+		t.Errorf("expected nil for nil input, got %v", result)
+	}
+
+	empty := []llm.ToolCall{}
+	result = convertLLMToolCalls(empty)
+	// nil and empty slice are both acceptable for zero elements
+	if result != nil && len(result) != 0 {
+		t.Errorf("expected empty/nil for empty input, got %v (len=%d)", result, len(result))
+	}
+}
+
+func TestConvertLLMToolCallsSingle(t *testing.T) {
+	input := []llm.ToolCall{
+		{ID: "call_1", Type: "function"},
+	}
+	input[0].Function.Name = "echo"
+	input[0].Function.Arguments = `{"text":"hi"}`
+
+	result := convertLLMToolCalls(input)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 element, got %d", len(result))
+	}
+	if result[0].ID != "call_1" {
+		t.Errorf("expected ID 'call_1', got %q", result[0].ID)
+	}
+	if result[0].Type != "function" {
+		t.Errorf("expected Type 'function', got %q", result[0].Type)
+	}
+	if result[0].Function.Name != "echo" {
+		t.Errorf("expected Name 'echo', got %q", result[0].Function.Name)
+	}
+	if result[0].Function.Arguments != `{"text":"hi"}` {
+		t.Errorf("expected Arguments '{\"text\":\"hi\"}', got %q", result[0].Function.Arguments)
+	}
+}
+
+func TestConvertLLMToolCallsMultiple(t *testing.T) {
+	input := []llm.ToolCall{
+		{ID: "call_a", Type: "function"},
+		{ID: "call_b", Type: "function"},
+		{ID: "call_c", Type: "function"},
+	}
+	input[0].Function.Name = "echo"
+	input[0].Function.Arguments = `{"text":"a"}`
+	input[1].Function.Name = "upper"
+	input[1].Function.Arguments = `{"text":"b"}`
+	input[2].Function.Name = "echo"
+	input[2].Function.Arguments = `{"text":"c"}`
+
+	result := convertLLMToolCalls(input)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 elements, got %d", len(result))
+	}
+	for i, expectedID := range []string{"call_a", "call_b", "call_c"} {
+		if result[i].ID != expectedID {
+			t.Errorf("element[%d]: expected ID %q, got %q", i, expectedID, result[i].ID)
+		}
+	}
+}
+
+// --- Tests for convertSessionToolCalls helper ---
+
+func TestConvertSessionToolCallsEmpty(t *testing.T) {
+	result := convertSessionToolCalls(nil)
+	if result != nil {
+		t.Errorf("expected nil for nil input, got %v", result)
+	}
+
+	empty := []session.ToolCall{}
+	result = convertSessionToolCalls(empty)
+	// nil and empty slice are both acceptable for zero elements
+	if result != nil && len(result) != 0 {
+		t.Errorf("expected empty/nil for empty input, got %v (len=%d)", result, len(result))
+	}
+}
+
+func TestConvertSessionToolCallsSingle(t *testing.T) {
+	input := []session.ToolCall{
+		{ID: "call_1", Type: "function"},
+	}
+	input[0].Function.Name = "view"
+	input[0].Function.Arguments = `{"path":"foo.md"}`
+
+	result := convertSessionToolCalls(input)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 element, got %d", len(result))
+	}
+	if result[0].ID != "call_1" {
+		t.Errorf("expected ID 'call_1', got %q", result[0].ID)
+	}
+	if result[0].Type != "function" {
+		t.Errorf("expected Type 'function', got %q", result[0].Type)
+	}
+	if result[0].Function.Name != "view" {
+		t.Errorf("expected Name 'view', got %q", result[0].Function.Name)
+	}
+	if result[0].Function.Arguments != `{"path":"foo.md"}` {
+		t.Errorf("expected Arguments, got %q", result[0].Function.Arguments)
+	}
+}
+
+func TestConvertSessionToolCallsMultiple(t *testing.T) {
+	input := []session.ToolCall{
+		{ID: "call_a", Type: "function"},
+		{ID: "call_b", Type: "function"},
+	}
+	input[0].Function.Name = "echo"
+	input[0].Function.Arguments = `{"text":"a"}`
+	input[1].Function.Name = "bash"
+	input[1].Function.Arguments = `{"cmd":"ls"}`
+
+	result := convertSessionToolCalls(input)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 elements, got %d", len(result))
+	}
+	if result[0].ID != "call_a" || result[0].Function.Name != "echo" {
+		t.Errorf("element[0] mismatch: %+v", result[0])
+	}
+	if result[1].ID != "call_b" || result[1].Function.Name != "bash" {
+		t.Errorf("element[1] mismatch: %+v", result[1])
+	}
+}
+
+// --- Tests for accumulateOutput helper ---
+
+func TestAccumulateOutputReasoningOnly(t *testing.T) {
+	var buf strings.Builder
+	agent := setupAgent(t, newMockClient(), 8192, 0.70, 10, 20, 4096, true, true)
+
+	resp := &llm.ChatResponse{
+		Content:          "",
+		ReasoningContent: "thinking hard",
+		ToolCalls:        nil,
+	}
+
+	agent.accumulateOutput(resp, &buf, false, nil)
+
+	expected := "[Reasoning: thinking hard]\n"
+	if buf.String() != expected {
+		t.Errorf("expected %q, got %q", expected, buf.String())
+	}
+}
+
+func TestAccumulateOutputContentOnly(t *testing.T) {
+	var buf strings.Builder
+	agent := setupAgent(t, newMockClient(), 8192, 0.70, 10, 20, 4096, true, true)
+
+	resp := &llm.ChatResponse{
+		Content:          "answer",
+		ReasoningContent: "",
+		ToolCalls:        nil,
+	}
+
+	agent.accumulateOutput(resp, &buf, false, nil)
+
+	expected := "answer"
+	if buf.String() != expected {
+		t.Errorf("expected %q, got %q", expected, buf.String())
+	}
+}
+
+func TestAccumulateOutputBoth(t *testing.T) {
+	var buf strings.Builder
+	agent := setupAgent(t, newMockClient(), 8192, 0.70, 10, 20, 4096, true, true)
+
+	resp := &llm.ChatResponse{
+		Content:          "final",
+		ReasoningContent: "reasoned",
+		ToolCalls:        nil,
+	}
+
+	agent.accumulateOutput(resp, &buf, false, nil)
+
+	expected := "[Reasoning: reasoned]\nfinal"
+	if buf.String() != expected {
+		t.Errorf("expected %q, got %q", expected, buf.String())
+	}
+}
+
+func TestAccumulateOutputEmpty(t *testing.T) {
+	var buf strings.Builder
+	agent := setupAgent(t, newMockClient(), 8192, 0.70, 10, 20, 4096, true, true)
+
+	resp := &llm.ChatResponse{}
+	agent.accumulateOutput(resp, &buf, false, nil)
+
+	if buf.String() != "" {
+		t.Errorf("expected empty output, got %q", buf.String())
+	}
+}
+
+// --- Tests for convertMessage with ToolCallID ---
+
+func TestConvertMessageWithToolCallID(t *testing.T) {
+	mc := newMockClient()
+	mc.QueueResponse(&llm.ChatResponse{Content: "ok", ToolCalls: nil})
+
+	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	sess := &session.Session{
+		ChannelID: "test",
+		Messages: []session.ConversationMessage{
+			{
+				Role:       session.RoleTool,
+				Content:    "result",
+				ToolCallID: "call_123",
+			},
+		},
+	}
+
+	_, err := agent.Process(context.Background(), sess, "continue", "System.", session.ImageAttachment{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// Verify the tool message was converted with ToolCallID
+	lastMsgs := mc.LastMessages()
+	var foundTool bool
+	for _, msg := range lastMsgs {
+		if msg.ToolCallID == "call_123" {
+			foundTool = true
+			break
+		}
+	}
+	if !foundTool {
+		t.Error("expected tool message with ToolCallID 'call_123' in LLM messages")
+	}
+}
+
+// --- Tests for convertMessage with both ToolCalls and ToolCallID ---
+
+func TestConvertMessageWithBothToolCallsAndToolCallID(t *testing.T) {
+	mc := newMockClient()
+	mc.QueueResponse(&llm.ChatResponse{Content: "ok", ToolCalls: nil})
+
+	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	sess := &session.Session{
+		ChannelID: "test",
+		Messages: []session.ConversationMessage{
+			{
+				Role:             session.RoleAssistant,
+				Content:          "",
+				ReasoningContent: "decided",
+				ToolCalls: []session.ToolCall{
+					{ID: "call_x", Type: "function"},
+				},
+				ToolCallID: "call_prev",
+			},
+		},
+	}
+
+	_, err := agent.Process(context.Background(), sess, "continue", "System.", session.ImageAttachment{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// Verify both ToolCalls and ToolCallID are in the LLM message
+	lastMsgs := mc.LastMessages()
+	var found bool
+	for _, msg := range lastMsgs {
+		if msg.ToolCallID == "call_prev" && len(msg.ToolCalls) == 1 && msg.ToolCalls[0].ID == "call_x" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected assistant message with both ToolCalls and ToolCallID")
+	}
+}
+
+// --- Tests for toMultimodalMessage with empty content ---
+
+func TestToMultimodalMessageEmptyContent(t *testing.T) {
+	mc := newMockClient()
+	mc.QueueResponse(&llm.ChatResponse{Content: "ok", ToolCalls: nil})
+
+	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	sess := &session.Session{
+		ChannelID: "test",
+		Messages: []session.ConversationMessage{
+			{
+				Role:        session.RoleUser,
+				Content:     "",
+				Attachments: []session.ImageAttachment{{Data: "img1", MIMEType: "image/png"}},
+			},
+		},
+	}
+
+	_, err := agent.Process(context.Background(), sess, "", "System.", session.ImageAttachment{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// User message should have only the image part (no text part)
+	lastMsgs := mc.LastMessages()
+	var parts []map[string]interface{}
+	if err := json.Unmarshal(lastMsgs[1].Content, &parts); err != nil {
+		t.Fatalf("expected content-parts array, got: %s", string(lastMsgs[1].Content))
+	}
+	if len(parts) != 1 {
+		t.Errorf("expected 1 content part (image only), got %d", len(parts))
+	}
+	if parts[0]["type"] != "image_url" {
+		t.Errorf("expected image_url part, got %v", parts[0])
+	}
+}
+
+// --- Tests for toMultimodalMessage with multiple attachments ---
+
+func TestToMultimodalMessageMultipleAttachments(t *testing.T) {
+	mc := newMockClient()
+	mc.QueueResponse(&llm.ChatResponse{Content: "ok", ToolCalls: nil})
+
+	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	sess := &session.Session{
+		ChannelID: "test",
+		Messages: []session.ConversationMessage{
+			{
+				Role:    session.RoleUser,
+				Content: "compare these",
+				Attachments: []session.ImageAttachment{
+					{Data: "img1", MIMEType: "image/png"},
+					{Data: "img2", MIMEType: "image/jpeg"},
+				},
+			},
+		},
+	}
+
+	_, err := agent.Process(context.Background(), sess, "compare", "System.", session.ImageAttachment{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// Should have text + 2 image parts = 3 parts
+	lastMsgs := mc.LastMessages()
+	var parts []map[string]interface{}
+	if err := json.Unmarshal(lastMsgs[1].Content, &parts); err != nil {
+		t.Fatalf("expected content-parts array, got: %s", string(lastMsgs[1].Content))
+	}
+	if len(parts) != 3 {
+		t.Errorf("expected 3 content parts (text + 2 images), got %d", len(parts))
+	}
+	if parts[0]["type"] != "text" {
+		t.Errorf("expected first part type 'text', got %v", parts[0]["type"])
+	}
+	if parts[1]["type"] != "image_url" || parts[2]["type"] != "image_url" {
+		t.Errorf("expected image_url for parts 1 and 2, got %v, %v", parts[1]["type"], parts[2]["type"])
+	}
+}
+
+// --- Tests for toMultimodalMessage with tool calls + attachments ---
+
+func TestToMultimodalMessageToolCallsWithAttachments(t *testing.T) {
+	mc := newMockClient()
+	mc.QueueResponse(&llm.ChatResponse{Content: "ok", ToolCalls: nil})
+
+	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	sess := &session.Session{
+		ChannelID: "test",
+		Messages: []session.ConversationMessage{
+			{
+				Role:    session.RoleAssistant,
+				Content: "",
+				ToolCalls: []session.ToolCall{
+					{ID: "call_1", Type: "function"},
+				},
+				Attachments: []session.ImageAttachment{{Data: "img1", MIMEType: "image/png"}},
+			},
+		},
+	}
+
+	_, err := agent.Process(context.Background(), sess, "continue", "System.", session.ImageAttachment{})
+	if err != nil {
+		t.Fatalf("Process failed: %v", err)
+	}
+
+	// Verify the message has both multimodal content and tool calls
+	lastMsgs := mc.LastMessages()
+	assistantMsg := lastMsgs[1]
+
+	// Should be multimodal (JSON array content)
+	var parts []map[string]interface{}
+	if err := json.Unmarshal(assistantMsg.Content, &parts); err != nil {
+		t.Fatalf("expected multimodal content, got: %s", string(assistantMsg.Content))
+	}
+	if len(parts) != 1 || parts[0]["type"] != "image_url" {
+		t.Errorf("expected image_url part, got %v", parts)
+	}
+
+	// Should also have tool calls
+	if len(assistantMsg.ToolCalls) != 1 {
+		t.Errorf("expected 1 tool call, got %d", len(assistantMsg.ToolCalls))
+	}
+	if assistantMsg.ToolCalls[0].ID != "call_1" {
+		t.Errorf("expected tool call ID 'call_1', got %q", assistantMsg.ToolCalls[0].ID)
+	}
+}
