@@ -6,7 +6,7 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ## agent/agent.go
 
-- [x] `agent.go:62-233` `Process()` — 172 lines, handles user message creation, channel logging, tool-call loop, LLM calls, tool execution, output accumulation, session state management, summarization triggering, and synthetic closing message generation.
+- [ ] `agent.go:62-233` `Process()` — 172 lines, handles user message creation, channel logging, tool-call loop, LLM calls, tool execution, output accumulation, session state management, summarization triggering, and synthetic closing message generation.
   - It contains the following behaviors, each one of which needs to be tested:
     - [x] ReasoningContent recorded in session on normal (non-error) response
     - [x] ReasoningContent-only response (Content empty, ReasoningContent present) produces correct output format
