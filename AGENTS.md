@@ -230,3 +230,7 @@ config.LLM.Endpoint = baseURL
 ### Existing e2e test patterns
 
 See `src/main_test.go` for integration test examples using mock LLM servers. `TestIntegration_FullMessageFlow` shows the pattern: create mock LLM server → start webhook → enqueue → wait for callback.
+
+## 10. Things to do
+
+The file `docs/TODO.md` contains the most up-to-date list of things that require remediation.
