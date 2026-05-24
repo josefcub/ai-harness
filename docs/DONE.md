@@ -23,3 +23,14 @@
   - Code quality issues:
     - [x] Duplicated error-handling pattern (lines 294-310 vs 317-332): both do `logger.Error` + `channelLogger.Log` + session append — extract `logAndRecordSummarizationError()`
     - [x] Repeated channelLogger.Log pattern with identical Entry struct appears 4 times — deduplicate
+
+- [x] `agent.go:362-376` `totalTokens()` — token estimation.
+  - It contains the following behaviors, each one of which needs to be tested:
+    - [x] Token count for attachments (`* attachmentTokenCost`)
+    - [x] Token count for tool calls (function name + arguments)
+    - [x] Token count for ReasoningContent (now counted — preserve_thinking includes it in context)
+    - [x] Token count for ToolCallID
+    - [x] System prompt token estimation (`/ 3`)
+
+
+

@@ -399,6 +399,7 @@ func (a *Agent) totalTokens(sess *session.Session, systemPrompt string) int {
 	total := len(systemPrompt) / 3
 	for _, msg := range sess.Messages {
 		total += len(msg.Content) / 3
+		total += len(msg.ReasoningContent) / 3
 		for _, tc := range msg.ToolCalls {
 			total += len(tc.Function.Name) / 2
 			total += len(tc.Function.Arguments) / 2
