@@ -6,8 +6,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ## agent/agent.go
 
-
-
 - [ ] `agent.go:362-376` `totalTokens()` — token estimation.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] Token count for attachments (`* attachmentTokenCost`)
