@@ -31,7 +31,7 @@ func setupAgentWithChannelLogger(t *testing.T, mc *mockClient, ctxTok int, sumTh
 		return "", fmt.Errorf("missing text")
 	})
 	chLogger := channellog.New(logDir)
-	return New(mc, reg, maxToolIter, ctxTok, sumThreshold, sumKeepRecent, maxTok, session.SummaryPrompt, logTools, logReasoning, chLogger, nil)
+	return New(mc, reg, maxToolIter, ctxTok, sumThreshold, sumKeepRecent, maxTok, SummaryPrompt, logTools, logReasoning, chLogger, nil)
 }
 
 // buildLongSession creates a session with many messages to exceed the summarization threshold.
@@ -349,7 +349,7 @@ func TestSummarizeContext_ChannelLoggerEntries(t *testing.T) {
 }
 
 // TestSummarizeContext_UsesProductionPrompt verifies that the summarization LLM call
-// actually receives session.SummaryPrompt (embedded from summary.md) as the system message.
+// actually receives SummaryPrompt (embedded from summary.md) as the system message.
 // This confirms the prompt injection path from main.go → agent.New → summarizeContext.
 func TestSummarizeContext_UsesProductionPrompt(t *testing.T) {
 	mc := newMockClient()
@@ -368,7 +368,7 @@ func TestSummarizeContext_UsesProductionPrompt(t *testing.T) {
 	}
 
 	// The first LLM call should be the summarization call.
-	// Verify its first message (the system prompt) matches session.SummaryPrompt.
+	// Verify its first message (the system prompt) matches SummaryPrompt.
 	firstCall := mc.FirstCallMessages()
 	if len(firstCall) == 0 {
 		t.Fatal("expected at least one message in first LLM call")
@@ -383,8 +383,8 @@ func TestSummarizeContext_UsesProductionPrompt(t *testing.T) {
 	if err := json.Unmarshal(systemMsg.Content, &contentStr); err != nil {
 		t.Fatalf("failed to unmarshal message content: %v", err)
 	}
-	if contentStr != session.SummaryPrompt {
-		t.Errorf("first message content does not match session.SummaryPrompt\nexpected:\n%s\n\ngot:\n%s", session.SummaryPrompt, contentStr)
+	if contentStr != SummaryPrompt {
+		t.Errorf("first message content does not match SummaryPrompt\nexpected:\n%s\n\ngot:\n%s", SummaryPrompt, contentStr)
 	}
 
 	// Verify there are additional messages (the old conversation messages) after the system prompt.

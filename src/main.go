@@ -85,7 +85,7 @@ func main() {
 		cfg.LLM.SummarizeThreshold,
 		cfg.LLM.SummarizeKeepRecent,
 		cfg.LLM.MaxTokens,
-		session.SummaryPrompt,
+		agent.SummaryPrompt,
 		cfg.Logging.LogToolCalls,
 		cfg.Logging.LogAgentReasoning,
 		channelLogger,
