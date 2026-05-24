@@ -56,10 +56,9 @@ func New(client ChatClient, reg *tools.Registry, maxToolIterations, contextToken
 	}
 }
 
-// Process runs the tool-call loop for a single user message and returns the
-// aggregated output string. The user message is appended to the session before
-// processing begins.
-func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText, systemPrompt string, imageAtt session.ImageAttachment) (string, error) {
+// buildUserMessage creates a user conversation message from the input text
+// and optional image attachment.
+func buildUserMessage(messageText string, imageAtt session.ImageAttachment) session.ConversationMessage {
 	msg := session.ConversationMessage{
 		Role:    session.RoleUser,
 		Content: messageText,
@@ -67,6 +66,104 @@ func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText,
 	if imageAtt.Data != "" {
 		msg.Attachments = []session.ImageAttachment{imageAtt}
 	}
+	return msg
+}
+
+// recordAssistantMessage appends the LLM response to the session and returns
+// the tool calls (if any). This eliminates duplicated session-append logic
+// across the normal and error paths.
+func recordAssistantMessage(sess *session.Session, resp *llm.ChatResponse) []llm.ToolCall {
+	sess.Messages = append(sess.Messages, session.ConversationMessage{
+		Role:             session.RoleAssistant,
+		Content:          resp.Content,
+		ReasoningContent: resp.ReasoningContent,
+		ToolCalls:        convertLLMToolCalls(resp.ToolCalls),
+	})
+	return resp.ToolCalls
+}
+
+// dispatchLLM calls the LLM chat API with the given messages and tool
+// definitions. On error with a partial response, it records the partial
+// response in the session and accumulates output before returning.
+func (a *Agent) dispatchLLM(ctx context.Context, sess *session.Session, messages []llm.Message, toolsJSON json.RawMessage, output *strings.Builder, iteration int) (*llm.ChatResponse, error) {
+	defs := a.tools.Definitions()
+	if len(defs) > 0 {
+		var err error
+		toolsJSON, err = json.Marshal(defs)
+		if err != nil {
+			return nil, fmt.Errorf("marshal tool definitions: %w", err)
+		}
+	}
+
+	resp, err := a.client.Chat(ctx, messages, toolsJSON, a.maxTokens)
+	if err != nil {
+		if a.logger != nil {
+			a.logger.Error("LLM call failed", "error", err.Error())
+		}
+
+		// Accumulate partial response content into session and output buffer
+		if resp != nil {
+			recordAssistantMessage(sess, resp)
+			a.accumulateOutput(resp, output, false, a.logger)
+			return resp, fmt.Errorf("LLM call interrupted (iteration %d, partial response saved): %w", iteration, err)
+		}
+
+		return resp, fmt.Errorf("LLM call failed (iteration %d): %w", iteration, err)
+	}
+
+	return resp, nil
+}
+
+// executeToolCalls logs and executes the given tool calls, accumulating
+// output and appending results to the session.
+func (a *Agent) executeToolCalls(sess *session.Session, toolCalls []llm.ToolCall, output *strings.Builder, logger *log.Logger) {
+	for _, tc := range toolCalls {
+		if a.logToolCalls && logger != nil {
+			logger.Debug("tool call", "tool", tc.Function.Name, "id", tc.ID,
+				"arguments", tc.Function.Arguments)
+		}
+
+		output.WriteString(fmt.Sprintf("\n[Tool Call: %s]\n", tc.Function.Name))
+
+		result, err := a.tools.Dispatch(tc.Function.Name, tc.Function.Arguments)
+		if err != nil {
+			if a.logToolCalls && logger != nil {
+				logger.Warn("tool error", "tool", tc.Function.Name, "error", err.Error())
+			}
+			result = err.Error()
+		}
+
+		if a.logToolCalls && logger != nil {
+			logger.Debug("tool result", "tool", tc.Function.Name, "result", result)
+		}
+
+		// Log tool call to channel log
+		_ = a.channelLogger.LogTool(sess.ChannelID, tc.Function.Name)
+
+		output.WriteString(fmt.Sprintf("[Result: %s]\n", result))
+
+		// Parse result for embedded attachments (e.g. images from view_image)
+		text, attachments := parseToolResult(result)
+
+		// Append tool result to session
+		toolMsg := session.ConversationMessage{
+			Role:       session.RoleTool,
+			Content:    text,
+			ToolCallID: tc.ID,
+		}
+		if len(attachments) > 0 {
+			toolMsg.Attachments = attachments
+		}
+		sess.Messages = append(sess.Messages, toolMsg)
+	}
+}
+
+// Process runs the tool-call loop for a single user message and returns the
+// aggregated output string. The user message is appended to the session before
+// processing begins.
+func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText, systemPrompt string, imageAtt session.ImageAttachment) (string, error) {
+	// Build and record user message
+	msg := buildUserMessage(messageText, imageAtt)
 	sess.Messages = append(sess.Messages, msg)
 
 	// Log user message to channel log
@@ -84,36 +181,10 @@ func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText,
 		// Build messages for LLM request
 		messages := a.toLLMMessages(sess, systemPrompt)
 
-		// Serialize tool definitions for the request
-		defs := a.tools.Definitions()
-		var toolsJSON json.RawMessage
-		if len(defs) > 0 {
-			data, err := json.Marshal(defs)
-			if err != nil {
-				return "", fmt.Errorf("marshal tool definitions: %w", err)
-			}
-			toolsJSON = data
-		}
-
-		// Call LLM
-		resp, err := a.client.Chat(ctx, messages, toolsJSON, a.maxTokens)
+		// Dispatch to LLM
+		resp, err := a.dispatchLLM(ctx, sess, messages, nil, &output, i)
 		if err != nil {
-			if logger != nil {
-				logger.Error("LLM call failed", "error", err.Error())
-			}
-
-			// Accumulate partial response content into session and output buffer
-			if resp != nil {
-				sess.Messages = append(sess.Messages, session.ConversationMessage{
-					Role:             session.RoleAssistant,
-					Content:          resp.Content,
-					ReasoningContent: resp.ReasoningContent,
-				})
-				a.accumulateOutput(resp, &output, false, logger)
-				return output.String(), fmt.Errorf("LLM call interrupted (iteration %d, partial response saved): %w", i+1, err)
-			}
-
-			return output.String(), fmt.Errorf("LLM call failed (iteration %d): %w", i+1, err)
+			return output.String(), err
 		}
 
 		// Log and accumulate agent response
@@ -121,11 +192,7 @@ func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText,
 
 		// If no tool calls, record the final assistant message and we're done
 		if len(resp.ToolCalls) == 0 {
-			sess.Messages = append(sess.Messages, session.ConversationMessage{
-				Role:             session.RoleAssistant,
-				Content:          resp.Content,
-				ReasoningContent: resp.ReasoningContent,
-			})
+			recordAssistantMessage(sess, resp)
 			// Log final assistant message to channel log
 			if resp.Content != "" {
 				_ = a.channelLogger.LogAssistant(sess.ChannelID, resp.Content)
@@ -134,54 +201,10 @@ func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText,
 		}
 
 		// Record assistant message with tool calls on session
-		sess.Messages = append(sess.Messages, session.ConversationMessage{
-			Role:             session.RoleAssistant,
-			Content:          resp.Content,
-			ReasoningContent: resp.ReasoningContent,
-			ToolCalls:        convertLLMToolCalls(resp.ToolCalls),
-		})
+		recordAssistantMessage(sess, resp)
 
-		// Execute each tool call
-		for _, tc := range resp.ToolCalls {
-			if a.logToolCalls && logger != nil {
-				logger.Debug("tool call", "tool", tc.Function.Name, "id", tc.ID,
-					"arguments", tc.Function.Arguments)
-			}
-
-			output.WriteString(fmt.Sprintf("\n[Tool Call: %s]\n", tc.Function.Name))
-
-			result, err := a.tools.Dispatch(tc.Function.Name, tc.Function.Arguments)
-			if err != nil {
-				if a.logToolCalls && logger != nil {
-					logger.Warn("tool error", "tool", tc.Function.Name, "error", err.Error())
-				}
-				result = err.Error()
-			}
-
-			if a.logToolCalls && logger != nil {
-				logger.Debug("tool result", "tool", tc.Function.Name, "result", result)
-			}
-
-			// Log tool call to channel log
-			_ = a.channelLogger.LogTool(sess.ChannelID, tc.Function.Name)
-
-			output.WriteString(fmt.Sprintf("[Result: %s]\n", result))
-
-			// Parse result for embedded attachments (e.g. images from view_image)
-			text, attachments := parseToolResult(result)
-
-			// Append tool result to session
-			toolMsg := session.ConversationMessage{
-				Role:       session.RoleTool,
-				Content:    text,
-				ToolCallID: tc.ID,
-			}
-			if len(attachments) > 0 {
-				toolMsg.Attachments = attachments
-			}
-			sess.Messages = append(sess.Messages, toolMsg)
-		}
-
+		// Execute tool calls
+		a.executeToolCalls(sess, resp.ToolCalls, &output, logger)
 	}
 
 	// If max iterations exhausted and last message is a tool result or
