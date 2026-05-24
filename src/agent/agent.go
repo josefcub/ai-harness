@@ -326,7 +326,22 @@ func (a *Agent) summarizeContext(ctx context.Context, sess *session.Session) err
 	summaryMessages := make([]llm.Message, 0, len(old)+1)
 	summaryMessages = append(summaryMessages, llm.NewTextMessage("system", a.summaryPrompt))
 	for _, msg := range old {
-		smsg := llm.NewTextMessage(string(msg.Role), msg.Content)
+		var smsg llm.Message
+		if len(msg.Attachments) > 0 && msg.Content != "" {
+			parts := []map[string]interface{}{
+				{"type": "text", "text": msg.Content},
+			}
+			for _, att := range msg.Attachments {
+				parts = append(parts, att.ToLLMContentPart())
+			}
+			contentJSON, _ := json.Marshal(parts)
+			smsg = llm.Message{
+				Role:    string(msg.Role),
+				Content: json.RawMessage(contentJSON),
+			}
+		} else {
+			smsg = llm.NewTextMessage(string(msg.Role), msg.Content)
+		}
 		smsg.ReasoningContent = msg.ReasoningContent
 		smsg.ToolCallID = msg.ToolCallID
 		summaryMessages = append(summaryMessages, smsg)
@@ -412,33 +427,14 @@ func (a *Agent) totalTokens(sess *session.Session, systemPrompt string) int {
 }
 
 // splitMessages splits the message list into old and recent groups.
-// The most recent `keepRecent` messages are preserved, along with any messages
-// that have image attachments (which cannot be summarized). Everything else is old.
+// The most recent `keepRecent` messages are preserved; everything else is old.
 func splitMessages(messages []session.ConversationMessage, keepRecent int) (old, recent []session.ConversationMessage) {
 	if keepRecent <= 0 || len(messages) <= keepRecent {
 		return messages, nil
 	}
 
-	n := len(messages)
-	recentStart := n - keepRecent
-
-	// Collect messages with attachments from the "old" region and move them to recent
-	var protected []session.ConversationMessage
-	var filteredOld []session.ConversationMessage
-	for i := 0; i < recentStart; i++ {
-		if len(messages[i].Attachments) > 0 {
-			protected = append(protected, messages[i])
-		} else {
-			filteredOld = append(filteredOld, messages[i])
-		}
-	}
-
-	recent = messages[recentStart:]
-	if len(protected) > 0 {
-		recent = append(protected, recent...)
-	}
-
-	return filteredOld, recent
+	recentStart := len(messages) - keepRecent
+	return messages[:recentStart], messages[recentStart:]
 }
 
 // parseToolResult parses a tool result string for embedded image attachments.

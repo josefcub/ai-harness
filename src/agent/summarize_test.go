@@ -182,7 +182,8 @@ func TestSummarizeContext_MessageStructure(t *testing.T) {
 }
 
 // TestSummarizeContext_AttachmentProtectedMessages verifies that messages with image
-// attachments in the "old" region are moved to the recent region and preserved.
+// attachments in the "old" region are passed to the summarizer as multimodal content,
+// and that only the most recent messages (by age) are preserved in the session.
 func TestSummarizeContext_AttachmentProtectedMessages(t *testing.T) {
 	mc := newMockClient()
 	logDir := t.TempDir()
@@ -235,8 +236,7 @@ func TestSummarizeContext_AttachmentProtectedMessages(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// After summarization: summary message + recent messages (10 recent + 1 protected)
-	// The protected message (index 5) should be in the recent section
+	// After summarization: summary message + recent messages (10 recent, no promotion)
 	if len(sess.Messages) < 2 {
 		t.Fatalf("expected at least 2 messages, got %d", len(sess.Messages))
 	}
@@ -253,24 +253,59 @@ func TestSummarizeContext_AttachmentProtectedMessages(t *testing.T) {
 		t.Errorf("summary ReasoningContent missing prefix: %q", summaryMsg.ReasoningContent)
 	}
 
-	// Verify the protected message (with attachment) is preserved in recent messages
-	hasAttachmentMsg := false
+	// Verify the message with attachment (index 5) is NOT preserved in recent —
+	// it was in the old region and should have been summarized away.
 	for i := 1; i < len(sess.Messages); i++ {
 		if len(sess.Messages[i].Attachments) > 0 {
-			hasAttachmentMsg = true
-			if sess.Messages[i].Attachments[0].MIMEType != "image/png" {
-				t.Errorf("protected message attachment MIMEType = %q, want %q",
-					sess.Messages[i].Attachments[0].MIMEType, "image/png")
-			}
-			// The protected message should have been from index 5 in the original session
-			if sess.Messages[i].Content == "" {
-				t.Error("protected message should have original content")
-			}
-			break
+			t.Errorf("message %d in recent has attachments (index 5 should have been summarized away)", i)
 		}
 	}
-	if !hasAttachmentMsg {
-		t.Error("expected protected message with attachment to be preserved in recent section")
+
+	// Verify the summarizer received the attachment as multimodal content.
+	// First Chat call is the summarization call.
+	firstCall := mc.FirstCallMessages()
+	if len(firstCall) == 0 {
+		t.Fatal("expected at least one message in summarization call")
+	}
+
+	// Find the message for index 5 (it's the 6th message in the summary call, after the system prompt).
+	// The summary call has: system prompt + 90 old messages (indices 0-89).
+	// Message #5 is at index 6 in firstCall (0=system, 1=old[0], ..., 6=old[5]).
+	if len(firstCall) < 7 {
+		t.Fatalf("expected at least 7 messages in summarization call, got %d", len(firstCall))
+	}
+	attMsg := firstCall[6]
+
+	// The content should be a multimodal array (not a plain string).
+	var contentInterface interface{}
+	if err := json.Unmarshal(attMsg.Content, &contentInterface); err != nil {
+		t.Fatalf("failed to unmarshal content: %v", err)
+	}
+
+	contentArr, ok := contentInterface.([]interface{})
+	if !ok {
+		t.Fatalf("expected content to be an array for multimodal message, got %T", contentInterface)
+	}
+	if len(contentArr) != 2 {
+		t.Fatalf("expected 2 content parts (text + image), got %d", len(contentArr))
+	}
+
+	// Verify text part
+	textPart, ok := contentArr[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected first part to be a map")
+	}
+	if textPart["type"] != "text" {
+		t.Errorf("first part type = %q, want %q", textPart["type"], "text")
+	}
+
+	// Verify image part
+	imgPart, ok := contentArr[1].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected second part to be a map")
+	}
+	if imgPart["type"] != "image_url" {
+		t.Errorf("second part type = %q, want %q", imgPart["type"], "image_url")
 	}
 }
 

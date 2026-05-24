@@ -1,21 +1,36 @@
 Your challenge today is to verify and validate that these tasks have been completed satisfactorily:
 
-- [x] `agent.go:255-360` `summarizeContext()` — summarization flow.
-  - It contains the following behaviors, each one of which needs to be tested:
-    - [x] Empty Content fallback to ReasoningContent (lines 314-316)
-    - [x] Summary message structure: Role=Assistant, Content="", ReasoningContent="[Summary...]\n<text>"
-    - [x] Summarization with attachment-protected messages through full flow
-  - Code quality issues:
-    - [x] Duplicated error-handling pattern (lines 294-310 vs 317-332): both do `logger.Error` + `channelLogger.Log` + session append — extract `logAndRecordSummarizationError()`
-    - [x] Repeated channelLogger.Log pattern with identical Entry struct appears 4 times — deduplicate
+```
+## Changes
+
+ src/agent/agent.go
+
+•  splitMessages()  (line 414-422): Removed attachment promotion logic. Now a pure age-based split
+— the most recent  keepRecent  messages go to  recent , everything else to  old .
+•  summarizeContext()  (line 328-346): Old messages with attachments are now built as multimodal
+llm.Message  with content-part arrays ( [{"type":"text","text":"..."}, {"type":"image_url",
+"image_url":{"url":"data:..."}}] ). Plain-text messages unchanged.
+
+ src/agent/agent_test.go
+
+• Removed  TestSplitMessages_AttachmentProtectedMovedToRecent  and
+TestSplitMessages_MixedOldWithAndWithoutAttachments  (tested the old promotion behavior).
+• Kept  TestSplitMessages ,  TestSplitMessagesKeepZero ,  TestSplitMessagesKeepAll  (pure age-based
+split tests).
+
+ src/agent/summarize_test.go
+
+• Rewrote  TestSummarizeContext_AttachmentProtectedMessages  to verify: (1) old attachment-bearing
+messages are NOT preserved in recent, (2) the summarizer receives them as multimodal content with
+both text and image_url parts.
+```
 
 If we find problems here, we will start a new session to remediate what you find, in order to preserve your context.  We'll leave editing or changing files to that new session.
 
 I have the following questions about the tasks above:
 
-  * Is the file `summary.md`'s contents sent to the LLM when the summarizer is called both in tests and for real?
-  * Are the error handling patterns deduplicated correctly?
-  * Is the channel logging pattern deduplicated correctly?
+  * How are we moving attachment-protected messages?
+  * How do attachments alter the summarization split?
   
   Ongoing concerns:
 

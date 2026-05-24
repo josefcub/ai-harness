@@ -32,5 +32,10 @@
     - [x] Token count for ToolCallID
     - [x] System prompt token estimation (`/ 3`)
 
+- [x] `agent.go:381-406` `splitMessages()` — message splitting for summarization.
+  - It contains the following behaviors, each one of which needs to be tested:
+    - [x] Attachment-protected messages moved from old to recent (lines 390-403)
+    - [x] Mixed scenario: some old messages with attachments, some without
+
 
 

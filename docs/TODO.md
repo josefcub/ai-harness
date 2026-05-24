@@ -6,11 +6,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ## agent/agent.go
 
-- [ ] `agent.go:381-406` `splitMessages()` — message splitting for summarization.
-  - It contains the following behaviors, each one of which needs to be tested:
-    - [ ] Attachment-protected messages moved from old to recent (lines 390-403)
-    - [ ] Mixed scenario: some old messages with attachments, some without
-
 - [ ] `agent.go:411-437` `parseToolResult()` — tool result parsing with attachment extraction.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] Valid JSON with `__attachment` key returns text + attachment
