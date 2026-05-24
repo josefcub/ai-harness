@@ -15,3 +15,11 @@
     - [x] Duplicated tool-call-to-session conversion (lines 157-166): same struct-copy pattern repeated in `convertMessage` and `toMultimodalMessage` — extract `convertToolCalls()` helper
     - [x] Function should decompose into: message creation, tool-call loop iteration, LLM dispatch, output accumulation
 
+- [x] `agent.go:255-360` `summarizeContext()` — summarization flow.
+  - It contains the following behaviors, each one of which needs to be tested:
+    - [x] Empty Content fallback to ReasoningContent (lines 314-316)
+    - [x] Summary message structure: Role=Assistant, Content="", ReasoningContent="[Summary...]\n<text>"
+    - [x] Summarization with attachment-protected messages through full flow
+  - Code quality issues:
+    - [x] Duplicated error-handling pattern (lines 294-310 vs 317-332): both do `logger.Error` + `channelLogger.Log` + session append — extract `logAndRecordSummarizationError()`
+    - [x] Repeated channelLogger.Log pattern with identical Entry struct appears 4 times — deduplicate

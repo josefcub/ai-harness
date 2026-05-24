@@ -6,14 +6,7 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ## agent/agent.go
 
-- [ ] `agent.go:255-360` `summarizeContext()` — summarization flow.
-  - It contains the following behaviors, each one of which needs to be tested:
-    - [ ] Empty Content fallback to ReasoningContent (lines 314-316)
-    - [ ] Summary message structure: Role=Assistant, Content="", ReasoningContent="[Summary...]\n<text>"
-    - [ ] Summarization with attachment-protected messages through full flow
-  - Code quality issues:
-    - [ ] Duplicated error-handling pattern (lines 294-310 vs 317-332): both do `logger.Error` + `channelLogger.Log` + session append — extract `logAndRecordSummarizationError()`
-    - [ ] Repeated channelLogger.Log pattern with identical Entry struct appears 4 times — deduplicate
+
 
 - [ ] `agent.go:362-376` `totalTokens()` — token estimation.
   - It contains the following behaviors, each one of which needs to be tested:

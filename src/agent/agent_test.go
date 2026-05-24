@@ -74,6 +74,16 @@ func (m *mockClient) LastMessages() []llm.Message {
 	return m.lastCalls[len(m.lastCalls)-1].messages
 }
 
+// FirstCallMessages returns the messages from the first Chat call (index 0).
+func (m *mockClient) FirstCallMessages() []llm.Message {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.lastCalls) == 0 {
+		return nil
+	}
+	return m.lastCalls[0].messages
+}
+
 // setupAgent creates an agent with a mock client and basic tool registry for testing.
 func setupAgent(t *testing.T, mc *mockClient, contextTokens int, summarizeThreshold float64, summarizeKeepRecent, maxToolIterations, maxTokens int, logToolCalls, logAgentReasoning bool) *Agent {
 	t.Helper()
