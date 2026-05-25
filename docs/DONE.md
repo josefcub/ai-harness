@@ -88,5 +88,19 @@ That's not a constructor — it's a configuration object masquerading as a param
 
 ---
 
+## worker/worker.go
+
+- [x] `worker.go:109-172` `processMessage()` — per-message processing with session save and callback dispatch.
+  - It contains the following behaviors, each one of which needs to be tested:
+    - [x] Session state after error: user message present in session
+    - [x] Session saved on error path (only callback is asserted currently)
+    - [x] buildSystemPrompt with AGENTS.md file present
+    - [x] buildSystemPrompt with all 5 prompt files simultaneously
+    - [x] buildSystemPrompt file delimiter format: `--- END FILENAME ---`
+  - Code quality issues:
+    - [x] Duplicated session save + error log (lines 140-148 vs 152-159) — extract `saveSession(sess)`
+    - [x] Duplicated callback send structure (lines 132-138 vs 162-170) — extract `sendCallback()`
+
+
 
 

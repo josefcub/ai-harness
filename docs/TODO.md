@@ -6,17 +6,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ## worker/worker.go
 
-- [ ] `worker.go:109-172` `processMessage()` — per-message processing with session save and callback dispatch.
-  - It contains the following behaviors, each one of which needs to be tested:
-    - [ ] Session state after error: user message present in session
-    - [ ] Session saved on error path (only callback is asserted currently)
-    - [ ] buildSystemPrompt with AGENTS.md file present
-    - [ ] buildSystemPrompt with all 5 prompt files simultaneously
-    - [ ] buildSystemPrompt file delimiter format: `--- END FILENAME ---`
-  - Code quality issues:
-    - [ ] Duplicated session save + error log (lines 140-148 vs 152-159) — extract `saveSession(sess)`
-    - [ ] Duplicated callback send structure (lines 132-138 vs 162-170) — extract `sendCallback()`
-
 - [ ] `worker.go:85-106` `Run()` — worker poll loop.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] Message enqueued after worker starts mid-poll is eventually picked up
@@ -229,7 +218,7 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ## tools/file_tools.go
 
-- [ ] `file_tools.go:493-683` `toolGlob()` — 190 lines, far too long.
+- [ ] `glob_tools.go` `toolGlob()` — 190 lines, far too long.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] Max 100 results cap
     - [ ] Sort order: newest first
@@ -238,13 +227,13 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
     - [ ] Violates SRP: argument parsing, path resolution, symlink eval, stat, recursive glob, single-level glob, sorting, capping, formatting — should extract `collectMatches()` and `applyGlobFilter()` helpers
     - [ ] Recursive and single-level branches have duplicated logic for hidden file skipping, sandbox validation, matchInfo creation
 
-- [ ] `file_tools.go:423-466` `grepFile()`.
+- [ ] `grep_tools.go` `grepFile()`.
   - Code quality issues:
     - [ ] Duplicated scanner loop: bufio.Scanner iteration with lineNum++ and match formatting appears twice (regex path and plain text path) — accept `matcher func(line string) bool` parameter
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] File read error path
 
-- [ ] `file_tools.go:155-216` `toolViewFile()`.
+- [ ] `file_tools.go` `toolViewFile()`.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] start_line > end_line error
     - [ ] Negative start/end clamping
@@ -254,28 +243,28 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
   - Code quality issues:
     - [ ] Duplicated bounds-checking for start and end — extract `clampIndex(value, max) int`
 
-- [ ] `file_tools.go:248-276` `toolAppendToFile()`.
+- [ ] `file_tools.go` `toolAppendToFile()`.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] Creating file that doesn't exist yet
     - [ ] Missing path/content
     - [ ] Sandbox escape
 
-- [ ] `file_tools.go:279-309` `toolListFiles()`.
+- [ ] `file_tools.go` `toolListFiles()`.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] Default path when missing/empty (uses ".")
     - [ ] Hidden files are skipped
 
-- [ ] `file_tools.go:312-352` `toolEditFile()`.
+- [ ] `file_tools.go` `toolEditFile()`.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] Only first occurrence is replaced (file with repeated old_text)
     - [ ] Sandbox escape
     - [ ] Missing-arg tests
 
-- [ ] `file_tools.go:355-420` `toolGrep()`.
+- [ ] `file_tools.go` `toolGrep()`.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] Missing pattern/path error tests
 
-- [ ] `file_tools.go:470-490` `globMatch()`.
+- [ ] `file_tools.go` `globMatch()`.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] Direct unit tests for `?`, `[seq]`, escaped special characters (`+`, `^`, `$`)
 

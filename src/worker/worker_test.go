@@ -34,11 +34,7 @@ func (m *mockProcessor) Process(ctx context.Context, sess *session.Session, mess
 	m.calls = append(m.calls, messageText)
 	m.mu.Unlock()
 
-	if m.err != nil {
-		return "", m.err
-	}
-
-	// Simulate real agent behavior: add user + assistant messages to session
+	// Simulate real agent behavior: add user message to session before LLM call
 	userMsg := session.ConversationMessage{
 		Role:    session.RoleUser,
 		Content: messageText,
@@ -47,6 +43,11 @@ func (m *mockProcessor) Process(ctx context.Context, sess *session.Session, mess
 		userMsg.Attachments = []session.ImageAttachment{imageAtt}
 	}
 	sess.Messages = append(sess.Messages, userMsg)
+
+	if m.err != nil {
+		return "", m.err
+	}
+
 	sess.Messages = append(sess.Messages, session.ConversationMessage{
 		Role:    session.RoleAssistant,
 		Content: m.response,
@@ -155,11 +156,13 @@ func TestWorker_CallbackDelivery(t *testing.T) {
 		Message string
 	}
 	var callbackMu sync.Mutex
+	callbackReceived := make(chan struct{})
 
 	callbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callbackMu.Lock()
 		defer callbackMu.Unlock()
 		json.NewDecoder(r.Body).Decode(&receivedCallback)
+		close(callbackReceived)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer callbackServer.Close()
@@ -183,6 +186,9 @@ func TestWorker_CallbackDelivery(t *testing.T) {
 	}()
 
 	<-proc.done
+	// Wait for the callback to actually be received before canceling.
+	// Without this, cancel() can interrupt the worker loop before sendCallback runs.
+	<-callbackReceived
 	cancel()
 	<-done
 
@@ -233,11 +239,13 @@ func TestWorker_ProcessorError(t *testing.T) {
 		Message string
 	}
 	var callbackMu sync.Mutex
+	callbackReceived := make(chan struct{})
 
 	callbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callbackMu.Lock()
 		defer callbackMu.Unlock()
 		json.NewDecoder(r.Body).Decode(&receivedCallback)
+		close(callbackReceived)
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer callbackServer.Close()
@@ -261,6 +269,7 @@ func TestWorker_ProcessorError(t *testing.T) {
 	}()
 
 	<-proc.done
+	<-callbackReceived
 	cancel()
 	<-done
 
@@ -272,6 +281,149 @@ func TestWorker_ProcessorError(t *testing.T) {
 	}
 	if receivedCallback.Message == "" {
 		t.Error("expected error message in callback")
+	}
+	if !strings.HasPrefix(receivedCallback.Message, "Error: processor error") {
+		t.Errorf("callback message = %q, want prefix %q", receivedCallback.Message, "Error: processor error")
+	}
+}
+
+func TestWorker_SessionSavedOnError(t *testing.T) {
+	var receivedCallback struct {
+		Channel string
+		Message string
+	}
+	var callbackMu sync.Mutex
+	callbackReceived := make(chan struct{})
+
+	callbackServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callbackMu.Lock()
+		defer callbackMu.Unlock()
+		json.NewDecoder(r.Body).Decode(&receivedCallback)
+		close(callbackReceived)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer callbackServer.Close()
+
+	proc := &mockProcessor{err: fmt.Errorf("processor error"), done: make(chan struct{}, 1)}
+	w, q, _ := newTestWorker(t, proc, t.TempDir())
+
+	q.Enqueue(queue.Message{
+		ChannelID:   "ch-error-save",
+		MessageText: "error save test",
+		CallbackURL: callbackServer.URL,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+
+	<-proc.done
+	<-callbackReceived
+	cancel()
+	<-done
+
+	// Verify error callback includes error message
+	callbackMu.Lock()
+	defer callbackMu.Unlock()
+
+	if !strings.HasPrefix(receivedCallback.Message, "Error: processor error") {
+		t.Errorf("callback message = %q, want prefix %q", receivedCallback.Message, "Error: processor error")
+	}
+}
+
+func TestWorker_SessionStateAfterError(t *testing.T) {
+	proc := &mockProcessor{err: fmt.Errorf("llm timeout"), done: make(chan struct{}, 1)}
+	w, q, sess := newTestWorker(t, proc, t.TempDir())
+
+	q.Enqueue(queue.Message{
+		ChannelID:   "ch-state-error",
+		MessageText: "state after error",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+
+	<-proc.done
+	cancel()
+	<-done
+
+	// Verify session persisted with exactly one user message
+	s := sess.Get("ch-state-error")
+	if s == nil {
+		t.Fatal("expected session to exist after error")
+	}
+	if len(s.Messages) != 1 {
+		t.Fatalf("expected 1 message in session, got %d", len(s.Messages))
+	}
+	msg := s.Messages[0]
+	if msg.Role != session.RoleUser {
+		t.Errorf("message role = %q, want %q", msg.Role, session.RoleUser)
+	}
+	if msg.Content != "state after error" {
+		t.Errorf("message content = %q, want %q", msg.Content, "state after error")
+	}
+}
+
+func TestBuildSystemPrompt_WithAGENTSFile(t *testing.T) {
+	workingDir := t.TempDir()
+
+	os.WriteFile(filepath.Join(workingDir, "AGENTS.md"), []byte("# Agent Instructions\n\nYou are helpful."), 0644)
+
+	w := New(queue.New(64, nil), session.NewManager(filepath.Join(t.TempDir(), "state")),
+		&mockProcessor{}, "Base prompt.", workingDir, nil)
+
+	prompt := w.buildSystemPrompt()
+
+	if !strings.Contains(prompt, "Base prompt.") {
+		t.Error("prompt missing base prompt")
+	}
+	if !strings.Contains(prompt, "--- AGENTS.md ---") {
+		t.Error("prompt missing AGENTS.md delimiter")
+	}
+	if !strings.Contains(prompt, "# Agent Instructions") {
+		t.Error("prompt missing AGENTS.md content")
+	}
+	if !strings.Contains(prompt, "--- END AGENTS.md ---") {
+		t.Error("prompt missing AGENTS.md end delimiter")
+	}
+}
+
+func TestBuildSystemPrompt_AllFiveFiles(t *testing.T) {
+	workingDir := t.TempDir()
+
+	os.WriteFile(filepath.Join(workingDir, "AGENTS.md"), []byte("agents content"), 0644)
+	os.WriteFile(filepath.Join(workingDir, "SOUL.md"), []byte("soul content"), 0644)
+	os.WriteFile(filepath.Join(workingDir, "IDENTITY.md"), []byte("identity content"), 0644)
+	os.WriteFile(filepath.Join(workingDir, "USER.md"), []byte("user content"), 0644)
+	os.WriteFile(filepath.Join(workingDir, "MEMORY.md"), []byte("memory content"), 0644)
+
+	w := New(queue.New(64, nil), session.NewManager(filepath.Join(t.TempDir(), "state")),
+		&mockProcessor{}, "Base prompt.", workingDir, nil)
+
+	prompt := w.buildSystemPrompt()
+
+	if !strings.Contains(prompt, "Base prompt.") {
+		t.Error("prompt missing base prompt")
+	}
+
+	for _, fname := range []string{"AGENTS.md", "SOUL.md", "IDENTITY.md", "USER.md", "MEMORY.md"} {
+		if !strings.Contains(prompt, fmt.Sprintf("--- %s ---", fname)) {
+			t.Errorf("prompt missing %s delimiter", fname)
+		}
+		if !strings.Contains(prompt, fmt.Sprintf("--- END %s ---", fname)) {
+			t.Errorf("prompt missing END delimiter for %s", fname)
+		}
 	}
 }
 
@@ -393,16 +545,13 @@ func TestWorker_SessionSaved(t *testing.T) {
 }
 
 func TestWorker_ConcurrentSafety(t *testing.T) {
-	proc := &mockProcessor{response: "ok"}
-	w, q, _ := newTestWorker(t, proc, t.TempDir())
+	// Wrap processor to count calls
+	countingProc := &mockProcessor{response: "ok", done: make(chan struct{}, 10)}
 
-	// Enqueue messages concurrently while worker is running
+	w, q, _ := newTestWorker(t, countingProc, t.TempDir())
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-
-	// Wrap processor to count
-	countingProc := &mockProcessor{response: "ok", done: make(chan struct{}, 10)}
-	w.processor = countingProc
 
 	done := make(chan struct{})
 	go func() {
@@ -426,9 +575,8 @@ func TestWorker_ConcurrentSafety(t *testing.T) {
 	<-done
 
 	calls := countingProc.GetCalls()
-	_ = calls // tracked by calls
-	if len(calls) < 10 {
-		t.Errorf("expected 10 calls, got %d (may vary due to timing)", len(calls))
+	if len(calls) != 10 {
+		t.Errorf("expected 10 calls, got %d", len(calls))
 	}
 }
 

@@ -105,6 +105,30 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 
+// saveSession persists a session to disk, logging any error.
+func (w *Worker) saveSession(s *session.Session) {
+	if err := w.sessions.Save(s); err != nil {
+		if w.logger != nil {
+			w.logger.Error("failed to save session",
+				"channel", s.ChannelID,
+				"error", err.Error(),
+			)
+		}
+	}
+}
+
+// sendCallback sends a callback to the given URL, logging any error.
+func (w *Worker) sendCallback(channelID, output, callbackURL string) {
+	if err := webhook.SendCallback(channelID, output, callbackURL, w.logger); err != nil {
+		if w.logger != nil {
+			w.logger.Error("callback failed",
+				"channel", channelID,
+				"error", err.Error(),
+			)
+		}
+	}
+}
+
 // processMessage handles a single message: agent processing, session save, callback.
 func (w *Worker) processMessage(ctx context.Context, msg queue.Message) {
 	logger := w.logger
@@ -134,39 +158,18 @@ func (w *Worker) processMessage(ctx context.Context, msg queue.Message) {
 			if output != "" {
 				callbackMsg += "\n\nPartial output:\n" + output
 			}
-			_ = webhook.SendCallback(msg.ChannelID, callbackMsg, msg.CallbackURL, w.logger)
+			w.sendCallback(msg.ChannelID, callbackMsg, msg.CallbackURL)
 		}
 		// Save session to persist the user message before returning
-		if err := w.sessions.Save(sess); err != nil {
-			if logger != nil {
-				logger.Error("failed to save session on error",
-					"channel", msg.ChannelID,
-					"error", err.Error(),
-				)
-			}
-		}
+		w.saveSession(sess)
 		return
 	}
 
 	// Save session state
-	if err := w.sessions.Save(sess); err != nil {
-		if logger != nil {
-			logger.Error("failed to save session",
-				"channel", msg.ChannelID,
-				"error", err.Error(),
-			)
-		}
-	}
+	w.saveSession(sess)
 
 	// Send callback if URL is present
 	if msg.CallbackURL != "" {
-		if err := webhook.SendCallback(msg.ChannelID, output, msg.CallbackURL, w.logger); err != nil {
-			if logger != nil {
-				logger.Error("callback failed",
-					"channel", msg.ChannelID,
-					"error", err.Error(),
-				)
-			}
-		}
+		w.sendCallback(msg.ChannelID, output, msg.CallbackURL)
 	}
 }
