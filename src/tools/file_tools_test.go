@@ -17,6 +17,8 @@ func newTestRegistry(t *testing.T) (*Registry, string) {
 
 	reg := New(dir)
 	RegisterFileTools(reg)
+	RegisterGrepTools(reg)
+	RegisterGlobTools(reg)
 	return reg, dir
 }
 

@@ -289,6 +289,8 @@ func TestIntegration_FullMessageFlow(t *testing.T) {
 	// Full agent + worker pipeline
 	reg := tools.New(workingDir)
 	tools.RegisterFileTools(reg)
+	tools.RegisterGrepTools(reg)
+	tools.RegisterGlobTools(reg)
 	llmClient := llm.New(mockURL, "test-model", "", 5*time.Second, logDir, nil)
 	agt := agent.New(llmClient, reg)
 	wrk := worker.New(q, sessions, agt, "You are a test assistant.", workingDir, nil)

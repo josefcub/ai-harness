@@ -66,6 +66,8 @@ func main() {
 	// 6. Create tool registry and register built-in tools
 	reg := tools.New(workingDir)
 	tools.RegisterFileTools(reg)
+	tools.RegisterGrepTools(reg)
+	tools.RegisterGlobTools(reg)
 	tools.RegisterWebTools(reg)
 	tools.RegisterImageTools(reg)
 	tools.RegisterBashTools(reg, cfg.Bash.Enabled, cfg.Bash.Timeout, cfg.Bash.MaxOutput, cfg.Bash.Banned)
