@@ -290,7 +290,7 @@ func TestIntegration_FullMessageFlow(t *testing.T) {
 	reg := tools.New(workingDir)
 	tools.RegisterFileTools(reg)
 	llmClient := llm.New(mockURL, "test-model", "", 5*time.Second, logDir, nil)
-	agt := agent.New(llmClient, reg, 3, 8192, 0.70, 10, 4096, "Summarize the above conversation.", true, true, nil, nil)
+	agt := agent.New(llmClient, reg)
 	wrk := worker.New(q, sessions, agt, "You are a test assistant.", workingDir, nil)
 
 	// Webhook HTTP server — wraps handleWebhook as the real HTTP handler
@@ -644,7 +644,7 @@ func TestIntegration_MultiChannel(t *testing.T) {
 	reg := tools.New(workingDir)
 	tools.RegisterFileTools(reg)
 	llmClient := llm.New(llmServer.URL, "test", "", 5*time.Second, filepath.Join(dir, "logs"), nil)
-	agt := agent.New(llmClient, reg, 3, 8192, 0.70, 10, 4096, "Summarize the above conversation.", false, false, nil, nil)
+	agt := agent.New(llmClient, reg, agent.WithMaxToolIterations(3))
 	wrk := worker.New(q, sessions, agt, "test prompt", workingDir, nil)
 
 	// Enqueue messages from different channels
@@ -738,7 +738,7 @@ func TestIntegration_AgentWithContextTrimming(t *testing.T) {
 	defer llmServer.Close()
 
 	llmClient := llm.New(llmServer.URL, "test", "", 5*time.Second, filepath.Join(dir, "logs"), nil)
-	agt := agent.New(llmClient, reg, 3, 100, 0.90, 2, 4096, "Summarize the above conversation.", false, false, nil, nil)
+	agt := agent.New(llmClient, reg, agent.WithMaxToolIterations(3), agent.WithContextTokens(100), agent.WithSummarizeThreshold(0.90), agent.WithSummarizeKeepRecent(2))
 
 	// Create session with many messages to exceed context
 	sess := &session.Session{
@@ -863,7 +863,7 @@ func TestIntegration_SystemPromptNotInSession(t *testing.T) {
 	defer llmServer.Close()
 
 	llmClient := llm.New(llmServer.URL, "test", "", 5*time.Second, filepath.Join(dir, "logs"), nil)
-	agt := agent.New(llmClient, reg, 3, 8192, 0.70, 10, 4096, "Summarize the above conversation.", false, false, nil, nil)
+	agt := agent.New(llmClient, reg, agent.WithMaxToolIterations(3))
 
 	sessMgr := session.NewManager(filepath.Join(dir, "state"))
 	sess := sessMgr.Get("prompt-test")
@@ -1071,7 +1071,7 @@ func TestIntegration_EndToEndNoCallback(t *testing.T) {
 	reg := tools.New(workingDir)
 	tools.RegisterFileTools(reg)
 	llmClient := llm.New(llmServer.URL, "test", "", 5*time.Second, filepath.Join(dir, "logs"), nil)
-	agt := agent.New(llmClient, reg, 3, 8192, 0.70, 10, 4096, "Summarize the above conversation.", false, false, nil, nil)
+	agt := agent.New(llmClient, reg, agent.WithMaxToolIterations(3))
 	wrk := worker.New(q, sessions, agt, "test prompt", workingDir, nil)
 
 	// Enqueue without callback URL

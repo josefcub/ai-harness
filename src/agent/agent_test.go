@@ -85,7 +85,7 @@ func (m *mockClient) FirstCallMessages() []llm.Message {
 }
 
 // setupAgent creates an agent with a mock client and basic tool registry for testing.
-func setupAgent(t *testing.T, mc *mockClient, contextTokens int, summarizeThreshold float64, summarizeKeepRecent, maxToolIterations, maxTokens int, logToolCalls, logAgentReasoning bool) *Agent {
+func setupAgent(t *testing.T, mc *mockClient, opts ...AgentOption) *Agent {
 	t.Helper()
 
 	// Create a temp dir for tool sandbox
@@ -105,7 +105,7 @@ func setupAgent(t *testing.T, mc *mockClient, contextTokens int, summarizeThresh
 		return "", fmt.Errorf("missing text")
 	})
 
-	return New(mc, reg, maxToolIterations, contextTokens, summarizeThreshold, summarizeKeepRecent, maxTokens, "Summarize the above conversation.", logToolCalls, logAgentReasoning, nil, nil)
+	return New(mc, reg, opts...)
 }
 
 func TestProcessPlainTextResponse(t *testing.T) {
@@ -115,7 +115,7 @@ func TestProcessPlainTextResponse(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -167,7 +167,7 @@ func TestProcessToolCallLoop(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -249,7 +249,7 @@ func TestProcessMaxIterationsSyntheticClosing(t *testing.T) {
 		mc.QueueResponse(resp)
 	}
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 3, 4096, true, true)
+	agent := setupAgent(t, mc, WithMaxToolIterations(3))
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -334,7 +334,7 @@ func TestProcessMaxIterationsNormalExitUnaffected(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 3, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -418,7 +418,7 @@ func TestProcessToolError(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -484,7 +484,7 @@ func TestProcessLLMError(t *testing.T) {
 	mc := newMockClient()
 	mc.QueueError(fmt.Errorf("connection refused"))
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -514,7 +514,7 @@ func TestProcessPartialResponse(t *testing.T) {
 		ToolCalls:        nil,
 	}, fmt.Errorf("connection reset — partial response"))
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -567,7 +567,7 @@ func TestSummarizationTriggersAtThreshold(t *testing.T) {
 	})
 
 	// Very small context window (100 tokens = ~400 chars)
-	agent := setupAgent(t, mc, 100, 0.90, 2, 20, 4096, true, true)
+	agent := setupAgent(t, mc, WithContextTokens(100), WithSummarizeThreshold(0.90), WithSummarizeKeepRecent(2))
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -638,7 +638,7 @@ func TestSummarizationFailure(t *testing.T) {
 	// First call: summarization LLM call fails
 	mc.QueueError(fmt.Errorf("context summarization LLM error"))
 
-	agent := setupAgent(t, mc, 100, 0.90, 2, 20, 4096, true, true)
+	agent := setupAgent(t, mc, WithContextTokens(100))
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -705,7 +705,7 @@ func TestSummarizationSkippedWhenUnderThreshold(t *testing.T) {
 	})
 
 	// Large context window — summarization should not trigger
-	agent := setupAgent(t, mc, 100000, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -807,7 +807,7 @@ func TestSystemPromptPreserved(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{ChannelID: "test", Messages: nil}
 
 	_, err := agent.Process(context.Background(), sess, "Hi", "You are a robot.", session.ImageAttachment{})
@@ -856,7 +856,7 @@ func TestMultipleToolCallsInOneTurn(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{ChannelID: "test", Messages: nil}
 
 	output, err := agent.Process(context.Background(), sess, "Echo twice", "You are helpful.", session.ImageAttachment{})
@@ -925,7 +925,7 @@ func TestProcessEmptyContentResponse(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{ChannelID: "test", Messages: nil}
 
 	output, err := agent.Process(context.Background(), sess, "Silent", "You are helpful.", session.ImageAttachment{})
@@ -964,7 +964,7 @@ func TestProcessWithImageAttachment(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test-channel",
 		Messages:  nil,
@@ -1023,7 +1023,7 @@ func TestProcessReasoningContentRecordedInSession(t *testing.T) {
 		ToolCalls:        nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{ChannelID: "test", Messages: nil}
 
 	_, err := agent.Process(context.Background(), sess, "What is 20+22?", "You are helpful.", session.ImageAttachment{})
@@ -1060,7 +1060,7 @@ func TestProcessReasoningOnlyResponse(t *testing.T) {
 		ToolCalls:        nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{ChannelID: "test", Messages: nil}
 
 	output, err := agent.Process(context.Background(), sess, "Think about it", "You are helpful.", session.ImageAttachment{})
@@ -1095,7 +1095,7 @@ func TestProcessReasoningOutputFormat(t *testing.T) {
 		ToolCalls:        nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{ChannelID: "test", Messages: nil}
 
 	output, err := agent.Process(context.Background(), sess, "Question", "You are helpful.", session.ImageAttachment{})
@@ -1179,7 +1179,7 @@ func TestProcessMultipleDifferentToolCalls(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := New(mc, reg, 20, 8192, 0.70, 10, 4096, "Summarize.", true, true, nil, nil)
+	agent := New(mc, reg)
 	sess := &session.Session{ChannelID: "test", Messages: nil}
 
 	output, err := agent.Process(context.Background(), sess, "Use both tools", "You are helpful.", session.ImageAttachment{})
@@ -1242,7 +1242,7 @@ func TestProcessImageAttachmentWithToolCall(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{ChannelID: "test", Messages: nil}
 
 	att := session.ImageAttachment{Data: "iVBORw0KGgo=", MIMEType: "image/png"}
@@ -1321,7 +1321,7 @@ func TestProcessReasoningPreservedAfterToolLoop(t *testing.T) {
 		ToolCalls:        nil,
 	})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{ChannelID: "test", Messages: nil}
 
 	output, err := agent.Process(context.Background(), sess, "Echo hello", "You are helpful.", session.ImageAttachment{})
@@ -1483,7 +1483,7 @@ func TestConvertSessionToolCallsMultiple(t *testing.T) {
 
 func TestAccumulateOutputReasoningOnly(t *testing.T) {
 	var buf strings.Builder
-	agent := setupAgent(t, newMockClient(), 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, newMockClient())
 
 	resp := &llm.ChatResponse{
 		Content:          "",
@@ -1501,7 +1501,7 @@ func TestAccumulateOutputReasoningOnly(t *testing.T) {
 
 func TestAccumulateOutputContentOnly(t *testing.T) {
 	var buf strings.Builder
-	agent := setupAgent(t, newMockClient(), 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, newMockClient())
 
 	resp := &llm.ChatResponse{
 		Content:          "answer",
@@ -1519,7 +1519,7 @@ func TestAccumulateOutputContentOnly(t *testing.T) {
 
 func TestAccumulateOutputBoth(t *testing.T) {
 	var buf strings.Builder
-	agent := setupAgent(t, newMockClient(), 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, newMockClient())
 
 	resp := &llm.ChatResponse{
 		Content:          "final",
@@ -1537,7 +1537,7 @@ func TestAccumulateOutputBoth(t *testing.T) {
 
 func TestAccumulateOutputEmpty(t *testing.T) {
 	var buf strings.Builder
-	agent := setupAgent(t, newMockClient(), 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, newMockClient())
 
 	resp := &llm.ChatResponse{}
 	agent.accumulateOutput(resp, &buf, false, nil)
@@ -1553,7 +1553,7 @@ func TestConvertMessageWithToolCallID(t *testing.T) {
 	mc := newMockClient()
 	mc.QueueResponse(&llm.ChatResponse{Content: "ok", ToolCalls: nil})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test",
 		Messages: []session.ConversationMessage{
@@ -1590,7 +1590,7 @@ func TestConvertMessageWithBothToolCallsAndToolCallID(t *testing.T) {
 	mc := newMockClient()
 	mc.QueueResponse(&llm.ChatResponse{Content: "ok", ToolCalls: nil})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test",
 		Messages: []session.ConversationMessage{
@@ -1631,7 +1631,7 @@ func TestToMultimodalMessageEmptyContent(t *testing.T) {
 	mc := newMockClient()
 	mc.QueueResponse(&llm.ChatResponse{Content: "ok", ToolCalls: nil})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test",
 		Messages: []session.ConversationMessage{
@@ -1668,7 +1668,7 @@ func TestToMultimodalMessageMultipleAttachments(t *testing.T) {
 	mc := newMockClient()
 	mc.QueueResponse(&llm.ChatResponse{Content: "ok", ToolCalls: nil})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test",
 		Messages: []session.ConversationMessage{
@@ -1711,7 +1711,7 @@ func TestToMultimodalMessageToolCallsWithAttachments(t *testing.T) {
 	mc := newMockClient()
 	mc.QueueResponse(&llm.ChatResponse{Content: "ok", ToolCalls: nil})
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 20, 4096, true, true)
+	agent := setupAgent(t, mc)
 	sess := &session.Session{
 		ChannelID: "test",
 		Messages: []session.ConversationMessage{
@@ -1934,7 +1934,7 @@ func TestParseToolResult_AttachmentMissingFields(t *testing.T) {
 // --- Message conversion tests ---
 
 func TestConvertMessage_ToolCallID(t *testing.T) {
-	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+	agent := setupAgent(t, newMockClient())
 
 	msg := session.ConversationMessage{
 		Role:       session.RoleTool,
@@ -1966,7 +1966,7 @@ func TestConvertMessage_ToolCallID(t *testing.T) {
 }
 
 func TestConvertMessage_ToolCallsAndToolCallID(t *testing.T) {
-	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+	agent := setupAgent(t, newMockClient())
 
 	msg := session.ConversationMessage{
 		Role:       session.RoleAssistant,
@@ -2007,7 +2007,7 @@ func TestConvertMessage_ToolCallsAndToolCallID(t *testing.T) {
 }
 
 func TestConvertMessage_PureText(t *testing.T) {
-	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+	agent := setupAgent(t, newMockClient())
 
 	msg := session.ConversationMessage{
 		Role:             session.RoleUser,
@@ -2042,7 +2042,7 @@ func TestConvertMessage_PureText(t *testing.T) {
 }
 
 func TestConvertMessage_Empty(t *testing.T) {
-	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+	agent := setupAgent(t, newMockClient())
 
 	msg := session.ConversationMessage{
 		Role: session.RoleUser,
@@ -2064,7 +2064,7 @@ func TestConvertMessage_Empty(t *testing.T) {
 }
 
 func TestToMultimodalMessage_ImageOnly(t *testing.T) {
-	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+	agent := setupAgent(t, newMockClient())
 
 	msg := session.ConversationMessage{
 		Role: session.RoleUser,
@@ -2102,7 +2102,7 @@ func TestToMultimodalMessage_ImageOnly(t *testing.T) {
 }
 
 func TestToMultimodalMessage_MultipleAttachments(t *testing.T) {
-	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+	agent := setupAgent(t, newMockClient())
 
 	msg := session.ConversationMessage{
 		Role:    session.RoleUser,
@@ -2140,7 +2140,7 @@ func TestToMultimodalMessage_MultipleAttachments(t *testing.T) {
 }
 
 func TestToMultimodalMessage_ToolCallsAndAttachments(t *testing.T) {
-	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+	agent := setupAgent(t, newMockClient())
 
 	msg := session.ConversationMessage{
 		Role:    session.RoleAssistant,

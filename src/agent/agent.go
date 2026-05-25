@@ -30,29 +30,99 @@ type Agent struct {
 	summarizeThreshold  float64
 	summarizeKeepRecent int
 	maxTokens           int
-	summaryPrompt       string
 	logToolCalls        bool
 	logAgentReasoning   bool
 	channelLogger       *channellog.Logger
 	logger              *log.Logger
 }
 
+// AgentOption configures an Agent.
+type AgentOption func(*agentConfig)
+
+type agentConfig struct {
+	channelLogger       *channellog.Logger
+	logger              *log.Logger
+	maxToolIterations   int
+	contextTokens       int
+	summarizeThreshold  float64
+	summarizeKeepRecent int
+	maxTokens           int
+	logToolCalls        bool
+	logAgentReasoning   bool
+}
+
+// WithChannelLogger sets the channel conversation logger.
+func WithChannelLogger(cl *channellog.Logger) AgentOption {
+	return func(c *agentConfig) { c.channelLogger = cl }
+}
+
+// WithLogger sets the agent logger.
+func WithLogger(l *log.Logger) AgentOption {
+	return func(c *agentConfig) { c.logger = l }
+}
+
+// WithMaxToolIterations sets the maximum number of tool-call iterations.
+func WithMaxToolIterations(n int) AgentOption {
+	return func(c *agentConfig) { c.maxToolIterations = n }
+}
+
+// WithContextTokens sets the context window size in tokens.
+func WithContextTokens(n int) AgentOption {
+	return func(c *agentConfig) { c.contextTokens = n }
+}
+
+// WithSummarizeThreshold sets the threshold fraction for summarization.
+func WithSummarizeThreshold(f float64) AgentOption {
+	return func(c *agentConfig) { c.summarizeThreshold = f }
+}
+
+// WithSummarizeKeepRecent sets the number of recent messages to preserve during summarization.
+func WithSummarizeKeepRecent(n int) AgentOption {
+	return func(c *agentConfig) { c.summarizeKeepRecent = n }
+}
+
+// WithMaxTokens sets the maximum tokens for LLM responses.
+func WithMaxTokens(n int) AgentOption {
+	return func(c *agentConfig) { c.maxTokens = n }
+}
+
+// WithLogToolCalls enables or disables tool call logging.
+func WithLogToolCalls(v bool) AgentOption {
+	return func(c *agentConfig) { c.logToolCalls = v }
+}
+
+// WithLogAgentReasoning enables or disables agent reasoning logging.
+func WithLogAgentReasoning(v bool) AgentOption {
+	return func(c *agentConfig) { c.logAgentReasoning = v }
+}
+
 // New creates a new Agent.
-// logger may be nil (logging calls are no-ops).
-func New(client ChatClient, reg *tools.Registry, maxToolIterations, contextTokens int, summarizeThreshold float64, summarizeKeepRecent, maxTokens int, summaryPrompt string, logToolCalls, logAgentReasoning bool, channelLogger *channellog.Logger, logger *log.Logger) *Agent {
+// logger and channelLogger may be nil (logging calls are no-ops).
+func New(client ChatClient, reg *tools.Registry, opts ...AgentOption) *Agent {
+	cfg := agentConfig{
+		maxToolIterations:   20,
+		contextTokens:       8192,
+		summarizeThreshold:  0.70,
+		summarizeKeepRecent: 10,
+		maxTokens:           4096,
+		logToolCalls:        true,
+		logAgentReasoning:   true,
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	return &Agent{
 		client:              client,
 		tools:               reg,
-		maxToolIterations:   maxToolIterations,
-		contextTokens:       contextTokens,
-		summarizeThreshold:  summarizeThreshold,
-		summarizeKeepRecent: summarizeKeepRecent,
-		maxTokens:           maxTokens,
-		summaryPrompt:       summaryPrompt,
-		logToolCalls:        logToolCalls,
-		logAgentReasoning:   logAgentReasoning,
-		channelLogger:       channelLogger,
-		logger:              logger,
+		maxToolIterations:   cfg.maxToolIterations,
+		contextTokens:       cfg.contextTokens,
+		summarizeThreshold:  cfg.summarizeThreshold,
+		summarizeKeepRecent: cfg.summarizeKeepRecent,
+		maxTokens:           cfg.maxTokens,
+		logToolCalls:        cfg.logToolCalls,
+		logAgentReasoning:   cfg.logAgentReasoning,
+		channelLogger:       cfg.channelLogger,
+		logger:              cfg.logger,
 	}
 }
 
@@ -138,7 +208,9 @@ func (a *Agent) executeToolCalls(sess *session.Session, toolCalls []llm.ToolCall
 		}
 
 		// Log tool call to channel log
-		_ = a.channelLogger.LogTool(sess.ChannelID, tc.Function.Name)
+		if a.channelLogger != nil {
+			_ = a.channelLogger.LogTool(sess.ChannelID, tc.Function.Name)
+		}
 
 		output.WriteString(fmt.Sprintf("[Result: %s]\n", result))
 
@@ -167,7 +239,9 @@ func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText,
 	sess.Messages = append(sess.Messages, msg)
 
 	// Log user message to channel log
-	_ = a.channelLogger.LogUser(sess.ChannelID, messageText)
+	if a.channelLogger != nil {
+		_ = a.channelLogger.LogUser(sess.ChannelID, messageText)
+	}
 
 	logger := a.logger
 	var output strings.Builder
@@ -194,7 +268,7 @@ func (a *Agent) Process(ctx context.Context, sess *session.Session, messageText,
 		if len(resp.ToolCalls) == 0 {
 			recordAssistantMessage(sess, resp)
 			// Log final assistant message to channel log
-			if resp.Content != "" {
+			if resp.Content != "" && a.channelLogger != nil {
 				_ = a.channelLogger.LogAssistant(sess.ChannelID, resp.Content)
 			}
 			break
@@ -324,7 +398,7 @@ func (a *Agent) summarizeContext(ctx context.Context, sess *session.Session) err
 
 	// Build messages for summary LLM call (no tools, just conversation)
 	summaryMessages := make([]llm.Message, 0, len(old)+1)
-	summaryMessages = append(summaryMessages, llm.NewTextMessage("system", a.summaryPrompt))
+	summaryMessages = append(summaryMessages, llm.NewTextMessage("system", SummaryPrompt))
 	for _, msg := range old {
 		var smsg llm.Message
 		if len(msg.Attachments) > 0 && msg.Content != "" {
@@ -388,6 +462,9 @@ func (a *Agent) summarizeContext(ctx context.Context, sess *session.Session) err
 
 // logSummary writes a channel log entry for summarization events.
 func (a *Agent) logSummary(channelID, message string) {
+	if a.channelLogger == nil {
+		return
+	}
 	_ = a.channelLogger.Log(channelID, channellog.Entry{
 		Role:    "system",
 		Action:  "tool",

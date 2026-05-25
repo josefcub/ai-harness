@@ -15,7 +15,7 @@ import (
 )
 
 // setupAgentWithChannelLogger creates an agent with a real channelLogger pointing to a temp dir.
-func setupAgentWithChannelLogger(t *testing.T, mc *mockClient, ctxTok int, sumThreshold float64, sumKeepRecent, maxToolIter, maxTok int, logTools, logReasoning bool, logDir string) *Agent {
+func setupAgentWithChannelLogger(t *testing.T, mc *mockClient, logDir string) *Agent {
 	t.Helper()
 	tmpDir := t.TempDir()
 	reg := tools.New(tmpDir)
@@ -31,7 +31,7 @@ func setupAgentWithChannelLogger(t *testing.T, mc *mockClient, ctxTok int, sumTh
 		return "", fmt.Errorf("missing text")
 	})
 	chLogger := channellog.New(logDir)
-	return New(mc, reg, maxToolIter, ctxTok, sumThreshold, sumKeepRecent, maxTok, SummaryPrompt, logTools, logReasoning, chLogger, nil)
+	return New(mc, reg, WithChannelLogger(chLogger))
 }
 
 // buildLongSession creates a session with many messages to exceed the summarization threshold.
@@ -95,7 +95,7 @@ func TestSummarizeContext_EmptyContentFallbackToReasoningContent(t *testing.T) {
 		Content: "Here is the summary of our discussion.",
 	})
 
-	agent := setupAgentWithChannelLogger(t, mc, 8192, 0.8, 10, 20, 4096, false, false, logDir)
+	agent := setupAgentWithChannelLogger(t, mc, logDir)
 
 	// Build a session with enough messages to trigger summarization
 	sess := buildLongSession("test-channel", 100, 200)
@@ -138,7 +138,7 @@ func TestSummarizeContext_MessageStructure(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgentWithChannelLogger(t, mc, 8192, 0.8, 10, 20, 4096, false, false, logDir)
+	agent := setupAgentWithChannelLogger(t, mc, logDir)
 
 	sess := buildLongSession("test-channel", 100, 200)
 
@@ -197,7 +197,7 @@ func TestSummarizeContext_AttachmentProtectedMessages(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgentWithChannelLogger(t, mc, 8192, 0.8, 10, 20, 4096, false, false, logDir)
+	agent := setupAgentWithChannelLogger(t, mc, logDir)
 
 	// Build a session with 100 messages, where message #5 (in the "old" region) has an attachment.
 	// keepRecent=10, so recentStart = 90. Message #5 is in old region (index 0-89).
@@ -325,7 +325,7 @@ func TestSummarizeContext_ChannelLoggerEntries(t *testing.T) {
 		ToolCalls: nil,
 	})
 
-	agent := setupAgentWithChannelLogger(t, mc, 8192, 0.8, 10, 20, 4096, false, false, logDir)
+	agent := setupAgentWithChannelLogger(t, mc, logDir)
 
 	sess := buildLongSession("testchannel", 100, 200)
 
@@ -393,7 +393,7 @@ func TestSummarizeContext_UsesProductionPrompt(t *testing.T) {
 	mc.QueueResponse(&llm.ChatResponse{Content: "Summary text."})
 	mc.QueueResponse(&llm.ChatResponse{Content: "Done."})
 
-	agent := setupAgentWithChannelLogger(t, mc, 8192, 0.8, 10, 20, 4096, false, false, logDir)
+	agent := setupAgentWithChannelLogger(t, mc, logDir)
 
 	sess := buildLongSession("testchannel", 100, 200)
 

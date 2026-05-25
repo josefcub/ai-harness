@@ -12,7 +12,7 @@ func setupTotalTokensAgent(t *testing.T) *Agent {
 	t.Helper()
 	tmpDir := t.TempDir()
 	reg := tools.New(tmpDir)
-	return New(nil, reg, 10, 8192, 0.8, 5, 4096, "system prompt", false, false, nil, nil)
+	return New(nil, reg)
 }
 
 func TestTotalTokens_SystemPromptEstimation(t *testing.T) {

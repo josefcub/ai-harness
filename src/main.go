@@ -80,16 +80,13 @@ func main() {
 	agt := agent.New(
 		llmClient,
 		reg,
-		cfg.LLM.MaxToolIterations,
-		cfg.LLM.ContextTokens,
-		cfg.LLM.SummarizeThreshold,
-		cfg.LLM.SummarizeKeepRecent,
-		cfg.LLM.MaxTokens,
-		agent.SummaryPrompt,
-		cfg.Logging.LogToolCalls,
-		cfg.Logging.LogAgentReasoning,
-		channelLogger,
-		logger.WithSource("agent"),
+		agent.WithChannelLogger(channelLogger),
+		agent.WithLogger(logger.WithSource("agent")),
+		agent.WithMaxToolIterations(cfg.LLM.MaxToolIterations),
+		agent.WithContextTokens(cfg.LLM.ContextTokens),
+		agent.WithSummarizeThreshold(cfg.LLM.SummarizeThreshold),
+		agent.WithSummarizeKeepRecent(cfg.LLM.SummarizeKeepRecent),
+		agent.WithMaxTokens(cfg.LLM.MaxTokens),
 	)
 
 	// 10. Create webhook server
