@@ -1502,3 +1502,181 @@ func TestToMultimodalMessageToolCallsWithAttachments(t *testing.T) {
 		t.Errorf("expected tool call ID 'call_1', got %q", assistantMsg.ToolCalls[0].ID)
 	}
 }
+
+// --- parseToolResult tests ---
+
+func TestParseToolResult_ValidJSONWithAttachment(t *testing.T) {
+	// Valid JSON with __attachment key and text field
+	input := `{"text":"done","__attachment":{"data":"base64img","mime_type":"image/png"}}`
+	text, attachments := parseToolResult(input)
+
+	if text != "done" {
+		t.Errorf("expected text 'done', got %q", text)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(attachments))
+	}
+	if attachments[0].Data != "base64img" {
+		t.Errorf("expected attachment data 'base64img', got %q", attachments[0].Data)
+	}
+	if attachments[0].MIMEType != "image/png" {
+		t.Errorf("expected mime_type 'image/png', got %q", attachments[0].MIMEType)
+	}
+}
+
+func TestParseToolResult_ValidJSONWithoutAttachment(t *testing.T) {
+	// Valid JSON without __attachment key — should return raw result
+	input := `{"result":"hello","status":"ok"}`
+	text, attachments := parseToolResult(input)
+
+	if text != input {
+		t.Errorf("expected raw result, got %q", text)
+	}
+	if attachments != nil {
+		t.Errorf("expected nil attachments, got %v", attachments)
+	}
+}
+
+func TestParseToolResult_NonJSONInput(t *testing.T) {
+	// Non-JSON input — should return raw result unchanged
+	input := `just plain text`
+	text, attachments := parseToolResult(input)
+
+	if text != input {
+		t.Errorf("expected raw result %q, got %q", input, text)
+	}
+	if attachments != nil {
+		t.Errorf("expected nil attachments, got %v", attachments)
+	}
+}
+
+func TestParseToolResult_AttachmentNoText(t *testing.T) {
+	// JSON with __attachment but no text field — returns "" + attachment
+	input := `{"__attachment":{"data":"abc123","mime_type":"image/jpeg"}}`
+	text, attachments := parseToolResult(input)
+
+	if text != "" {
+		t.Errorf("expected empty text, got %q", text)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(attachments))
+	}
+	if attachments[0].Data != "abc123" {
+		t.Errorf("expected attachment data 'abc123', got %q", attachments[0].Data)
+	}
+	if attachments[0].MIMEType != "image/jpeg" {
+		t.Errorf("expected mime_type 'image/jpeg', got %q", attachments[0].MIMEType)
+	}
+}
+
+func TestParseToolResult_InvalidAttachmentMarshal(t *testing.T) {
+	// __attachment is a JSON array — Marshal succeeds, Unmarshal into ImageAttachment fails
+	input := `{"__attachment":[1,2,3],"text":"hello"}`
+	text, attachments := parseToolResult(input)
+
+	if text != input {
+		t.Errorf("expected raw result on unmarshal failure, got %q", text)
+	}
+	if attachments != nil {
+		t.Errorf("expected nil attachments on unmarshal failure, got %v", attachments)
+	}
+}
+
+func TestParseToolResult_InvalidAttachmentUnmarshal(t *testing.T) {
+	// __attachment is a valid JSON string — Marshal succeeds, Unmarshal into struct fails
+	input := `{"__attachment":"not an object","text":"hello"}`
+	text, attachments := parseToolResult(input)
+
+	if text != input {
+		t.Errorf("expected raw result on unmarshal failure, got %q", text)
+	}
+	if attachments != nil {
+		t.Errorf("expected nil attachments on unmarshal failure, got %v", attachments)
+	}
+}
+
+func TestParseToolResult_EmptyString(t *testing.T) {
+	// Empty string is not valid JSON — should return raw empty string
+	text, attachments := parseToolResult("")
+
+	if text != "" {
+		t.Errorf("expected empty text, got %q", text)
+	}
+	if attachments != nil {
+		t.Errorf("expected nil attachments, got %v", attachments)
+	}
+}
+
+func TestParseToolResult_AttachmentWithExtraFields(t *testing.T) {
+	// __attachment has extra fields beyond Data/MIMEType — should still extract Data and MIMEType
+	input := `{"text":"ok","__attachment":{"data":"xyz","mime_type":"image/gif","extra":"ignored"}}`
+	text, attachments := parseToolResult(input)
+
+	if text != "ok" {
+		t.Errorf("expected text 'ok', got %q", text)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(attachments))
+	}
+	if attachments[0].Data != "xyz" {
+		t.Errorf("expected data 'xyz', got %q", attachments[0].Data)
+	}
+	if attachments[0].MIMEType != "image/gif" {
+		t.Errorf("expected mime_type 'image/gif', got %q", attachments[0].MIMEType)
+	}
+}
+
+func TestParseToolResult_TextNonString(t *testing.T) {
+	// text field is a number — type assertion fails, returns "" + attachment
+	input := `{"text":123,"__attachment":{"data":"img","mime_type":"image/png"}}`
+	text, attachments := parseToolResult(input)
+
+	if text != "" {
+		t.Errorf("expected empty text for non-string text field, got %q", text)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(attachments))
+	}
+	if attachments[0].Data != "img" {
+		t.Errorf("expected attachment data 'img', got %q", attachments[0].Data)
+	}
+}
+
+func TestParseToolResult_AttachmentNull(t *testing.T) {
+	// __attachment is JSON null — Marshal("null") succeeds, Unmarshal into struct also succeeds (zero values)
+	// So it returns the text field + attachment with zero-value fields
+	input := `{"__attachment":null,"text":"hello"}`
+	text, attachments := parseToolResult(input)
+
+	if text != "hello" {
+		t.Errorf("expected text 'hello' (text field extracted), got %q", text)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(attachments))
+	}
+	if attachments[0].Data != "" {
+		t.Errorf("expected zero-data for null attachment, got %q", attachments[0].Data)
+	}
+	if attachments[0].MIMEType != "" {
+		t.Errorf("expected zero-mime_type for null attachment, got %q", attachments[0].MIMEType)
+	}
+}
+
+func TestParseToolResult_AttachmentMissingFields(t *testing.T) {
+	// __attachment object exists but has no data/mime_type — zero values
+	input := `{"text":"ok","__attachment":{}}`
+	text, attachments := parseToolResult(input)
+
+	if text != "ok" {
+		t.Errorf("expected text 'ok', got %q", text)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(attachments))
+	}
+	if attachments[0].Data != "" {
+		t.Errorf("expected zero-data, got %q", attachments[0].Data)
+	}
+	if attachments[0].MIMEType != "" {
+		t.Errorf("expected zero-mime_type, got %q", attachments[0].MIMEType)
+	}
+}

@@ -6,14 +6,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ## agent/agent.go
 
-- [ ] `agent.go:411-437` `parseToolResult()` — tool result parsing with attachment extraction.
-  - It contains the following behaviors, each one of which needs to be tested:
-    - [ ] Valid JSON with `__attachment` key returns text + attachment
-    - [ ] Valid JSON without `__attachment` returns raw result
-    - [ ] Non-JSON input returns raw result
-    - [ ] JSON with `__attachment` but no `text` field returns `""` + attachment
-    - [ ] Invalid `__attachment` JSON (marshal/unmarshal error) returns raw result
-
 - [ ] `agent.go:455-528` `convertMessage()` / `toMultimodalMessage()` — message conversion.
   - It contains the following behaviors, each one of which needs to be tested:
     - [ ] convertMessage with ToolCallID set

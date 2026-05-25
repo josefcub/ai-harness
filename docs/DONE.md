@@ -37,5 +37,13 @@
     - [x] Attachment-protected messages moved from old to recent (lines 390-403)
     - [x] Mixed scenario: some old messages with attachments, some without
 
+- [x] `agent.go:411-437` `parseToolResult()` — tool result parsing with attachment extraction.
+  - It contains the following behaviors, each one of which needs to be tested:
+    - [x] Valid JSON with `__attachment` key returns text + attachment
+    - [x] Valid JSON without `__attachment` returns raw result
+    - [x] Non-JSON input returns raw result
+    - [x] JSON with `__attachment` but no `text` field returns `""` + attachment
+    - [x] Invalid `__attachment` JSON (marshal/unmarshal error) returns raw result
+
 
 
