@@ -601,9 +601,12 @@ func TestSummarizationTriggersAtThreshold(t *testing.T) {
 	if sess.Messages[0].Role != session.RoleAssistant {
 		t.Errorf("message[0] expected role assistant, got %s", sess.Messages[0].Role)
 	}
-	expectedReasoningPrefix := "[Summary of prior conversation]"
-	if !strings.HasPrefix(sess.Messages[0].ReasoningContent, expectedReasoningPrefix) {
-		t.Errorf("message[0] expected ReasoningContent to start with %q, got %q", expectedReasoningPrefix, sess.Messages[0].ReasoningContent)
+	expectedContentPrefix := "[Summary of prior conversation]"
+	if !strings.HasPrefix(sess.Messages[0].Content, expectedContentPrefix) {
+		t.Errorf("message[0] expected Content to start with %q, got %q", expectedContentPrefix, sess.Messages[0].Content)
+	}
+	if !sess.Messages[0].Summary {
+		t.Error("message[0] expected Summary flag to be true")
 	}
 
 	// Message 1: kept recent assistant (old assistant, not summarized)

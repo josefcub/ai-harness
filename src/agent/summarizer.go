@@ -1,0 +1,156 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/agent-project/harness/channellog"
+	"github.com/agent-project/harness/llm"
+	"github.com/agent-project/harness/log"
+	"github.com/agent-project/harness/session"
+)
+
+// Summarizer compresses older conversation messages into a summary
+// to stay within the LLM context window. The most recent messages are preserved.
+type Summarizer struct {
+	client        ChatClient
+	maxTokens     int
+	keepRecent    int
+	channelLogger *channellog.Logger
+	logger        *log.Logger
+}
+
+// NewSummarizer creates a new Summarizer.
+func NewSummarizer(client ChatClient, maxTokens, keepRecent int, channelLogger *channellog.Logger, logger *log.Logger) *Summarizer {
+	return &Summarizer{
+		client:        client,
+		maxTokens:     maxTokens,
+		keepRecent:    keepRecent,
+		channelLogger: channelLogger,
+		logger:        logger,
+	}
+}
+
+// Summarize compresses older messages in the session into a summary
+// to stay within the context window. The most recent messages are preserved.
+func (s *Summarizer) Summarize(ctx context.Context, sess *session.Session) error {
+	logger := s.logger
+
+	// Log start
+	if logger != nil {
+		logger.Info("context summarization started",
+			"total_messages", fmt.Sprintf("%d", len(sess.Messages)),
+			"keep_recent", fmt.Sprintf("%d", s.keepRecent),
+		)
+	}
+	s.logSummary(sess.ChannelID, "Context summarization started")
+
+	// Split messages into old and recent
+	old, recent := splitMessages(sess.Messages, s.keepRecent)
+
+	if len(old) == 0 {
+		if logger != nil {
+			logger.Info("context summarization skipped (no old messages to summarize)")
+		}
+		return nil
+	}
+
+	// Build messages for summary LLM call (no tools, just conversation)
+	summaryMessages := buildSummaryMessages(old)
+
+	// Call LLM for summary
+	resp, err := s.client.Chat(ctx, summaryMessages, nil, s.maxTokens)
+	if err != nil {
+		errMsg := fmt.Sprintf("context summarization failed: %v", err)
+		s.logAndRecordSummarizationError(sess, errMsg, err)
+		return fmt.Errorf("context summarization failed: %w", err)
+	}
+
+	summaryText := resp.Content
+	if summaryText == "" {
+		summaryText = resp.ReasoningContent
+	}
+	if summaryText == "" {
+		errMsg := "context summarization failed: LLM returned empty summary"
+		s.logAndRecordSummarizationError(sess, errMsg, fmt.Errorf("empty summary"))
+	}
+
+	// Replace old messages with summary, keep recent
+	sess.Messages = make([]session.ConversationMessage, 0, len(recent)+1)
+	sess.Messages = append(sess.Messages, session.ConversationMessage{
+		Role:    session.RoleAssistant,
+		Content: "[Summary of prior conversation]\n" + summaryText,
+		Summary: true,
+	})
+	sess.Messages = append(sess.Messages, recent...)
+
+	summaryTokens := len(summaryText) / 4
+	if logger != nil {
+		logger.Info("context summarization complete",
+			"old_messages", fmt.Sprintf("%d", len(old)),
+			"kept_messages", fmt.Sprintf("%d", len(recent)),
+			"summary_tokens", fmt.Sprintf("%d", summaryTokens),
+		)
+	}
+	s.logSummary(sess.ChannelID, fmt.Sprintf("Context summarization complete. Summarized %d messages, kept %d recent.", len(old), len(recent)))
+
+	return nil
+}
+
+// logSummary writes a channel log entry for summarization events.
+func (s *Summarizer) logSummary(channelID, message string) {
+	if s.channelLogger == nil {
+		return
+	}
+	_ = s.channelLogger.Log(channelID, channellog.Entry{
+		Role:    "system",
+		Action:  "tool",
+		Tool:    "session_summary",
+		Message: message,
+	})
+}
+
+// logAndRecordSummarizationError logs an error during summarization, writes
+// a channel log entry, records the failure in the session, and returns the error.
+func (s *Summarizer) logAndRecordSummarizationError(sess *session.Session, errMsg string, err error) {
+	if s.logger != nil {
+		s.logger.Error(errMsg)
+	}
+	s.logSummary(sess.ChannelID, errMsg)
+	sess.Messages = append(sess.Messages, session.ConversationMessage{
+		Role:    session.RoleTool,
+		Content: errMsg,
+	})
+}
+
+// buildSummaryMessages constructs the LLM messages for a summarization call.
+// It prepends the production summary prompt as the system message, then adds
+// each old conversation message (preserving multimodal content for messages
+// with image attachments).
+func buildSummaryMessages(old []session.ConversationMessage) []llm.Message {
+	msgs := make([]llm.Message, 0, len(old)+1)
+	msgs = append(msgs, llm.NewTextMessage("system", SummaryPrompt))
+	for _, msg := range old {
+		var smsg llm.Message
+		if len(msg.Attachments) > 0 && msg.Content != "" {
+			parts := []map[string]interface{}{
+				{"type": "text", "text": msg.Content},
+			}
+			for _, att := range msg.Attachments {
+				parts = append(parts, att.ToLLMContentPart())
+			}
+			contentJSON, _ := json.Marshal(parts)
+			smsg = llm.Message{
+				Role:    string(msg.Role),
+				Content: json.RawMessage(contentJSON),
+			}
+		} else {
+			smsg = llm.NewTextMessage(string(msg.Role), msg.Content)
+		}
+		smsg.ReasoningContent = msg.ReasoningContent
+		smsg.ToolCallID = msg.ToolCallID
+		msgs = append(msgs, smsg)
+	}
+	return msgs
+}

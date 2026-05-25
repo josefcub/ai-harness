@@ -34,6 +34,7 @@ type Agent struct {
 	logAgentReasoning   bool
 	channelLogger       *channellog.Logger
 	logger              *log.Logger
+	summarizer          *Summarizer
 }
 
 // AgentOption configures an Agent.
@@ -49,6 +50,7 @@ type agentConfig struct {
 	maxTokens           int
 	logToolCalls        bool
 	logAgentReasoning   bool
+	summarizer          *Summarizer
 }
 
 // WithChannelLogger sets the channel conversation logger.
@@ -123,6 +125,7 @@ func New(client ChatClient, reg *tools.Registry, opts ...AgentOption) *Agent {
 		logAgentReasoning:   cfg.logAgentReasoning,
 		channelLogger:       cfg.channelLogger,
 		logger:              cfg.logger,
+		summarizer:          NewSummarizer(client, cfg.maxTokens, cfg.summarizeKeepRecent, cfg.channelLogger, cfg.logger),
 	}
 }
 
@@ -372,118 +375,10 @@ func (a *Agent) summarizeIfNeeded(ctx context.Context, sess *session.Session, sy
 	return a.summarizeContext(ctx, sess)
 }
 
-// summarizeContext compresses older messages in the session into a summary
-// to stay within the context window. The most recent messages are preserved.
+// summarizeContext delegates to the Summarizer to compress older messages
+// in the session into a summary to stay within the context window.
 func (a *Agent) summarizeContext(ctx context.Context, sess *session.Session) error {
-	logger := a.logger
-
-	// Log start
-	if logger != nil {
-		logger.Info("context summarization started",
-			"total_messages", fmt.Sprintf("%d", len(sess.Messages)),
-			"keep_recent", fmt.Sprintf("%d", a.summarizeKeepRecent),
-		)
-	}
-	a.logSummary(sess.ChannelID, "Context summarization started")
-
-	// Split messages into old and recent
-	old, recent := splitMessages(sess.Messages, a.summarizeKeepRecent)
-
-	if len(old) == 0 {
-		if logger != nil {
-			logger.Info("context summarization skipped (no old messages to summarize)")
-		}
-		return nil
-	}
-
-	// Build messages for summary LLM call (no tools, just conversation)
-	summaryMessages := make([]llm.Message, 0, len(old)+1)
-	summaryMessages = append(summaryMessages, llm.NewTextMessage("system", SummaryPrompt))
-	for _, msg := range old {
-		var smsg llm.Message
-		if len(msg.Attachments) > 0 && msg.Content != "" {
-			parts := []map[string]interface{}{
-				{"type": "text", "text": msg.Content},
-			}
-			for _, att := range msg.Attachments {
-				parts = append(parts, att.ToLLMContentPart())
-			}
-			contentJSON, _ := json.Marshal(parts)
-			smsg = llm.Message{
-				Role:    string(msg.Role),
-				Content: json.RawMessage(contentJSON),
-			}
-		} else {
-			smsg = llm.NewTextMessage(string(msg.Role), msg.Content)
-		}
-		smsg.ReasoningContent = msg.ReasoningContent
-		smsg.ToolCallID = msg.ToolCallID
-		summaryMessages = append(summaryMessages, smsg)
-	}
-
-	// Call LLM for summary
-	resp, err := a.client.Chat(ctx, summaryMessages, nil, a.maxTokens)
-	if err != nil {
-		errMsg := fmt.Sprintf("context summarization failed: %v", err)
-		a.logAndRecordSummarizationError(logger, sess, errMsg, err)
-		return fmt.Errorf("context summarization failed: %w", err)
-	}
-
-	summaryText := resp.Content
-	if summaryText == "" {
-		summaryText = resp.ReasoningContent
-	}
-	if summaryText == "" {
-		errMsg := "context summarization failed: LLM returned empty summary"
-		a.logAndRecordSummarizationError(logger, sess, errMsg, fmt.Errorf("empty summary"))
-	}
-
-	// Replace old messages with summary, keep recent
-	sess.Messages = make([]session.ConversationMessage, 0, len(recent)+1)
-	sess.Messages = append(sess.Messages, session.ConversationMessage{
-		Role:             session.RoleAssistant,
-		Content:          "",
-		ReasoningContent: "[Summary of prior conversation]\n" + summaryText,
-	})
-	sess.Messages = append(sess.Messages, recent...)
-
-	summaryTokens := len(summaryText) / 4
-	if logger != nil {
-		logger.Info("context summarization complete",
-			"old_messages", fmt.Sprintf("%d", len(old)),
-			"kept_messages", fmt.Sprintf("%d", len(recent)),
-			"summary_tokens", fmt.Sprintf("%d", summaryTokens),
-		)
-	}
-	a.logSummary(sess.ChannelID, fmt.Sprintf("Context summarization complete. Summarized %d messages, kept %d recent.", len(old), len(recent)))
-
-	return nil
-}
-
-// logSummary writes a channel log entry for summarization events.
-func (a *Agent) logSummary(channelID, message string) {
-	if a.channelLogger == nil {
-		return
-	}
-	_ = a.channelLogger.Log(channelID, channellog.Entry{
-		Role:    "system",
-		Action:  "tool",
-		Tool:    "session_summary",
-		Message: message,
-	})
-}
-
-// logAndRecordSummarizationError logs an error during summarization, writes
-// a channel log entry, records the failure in the session, and returns the error.
-func (a *Agent) logAndRecordSummarizationError(logger *log.Logger, sess *session.Session, errMsg string, err error) {
-	if logger != nil {
-		logger.Error(errMsg)
-	}
-	a.logSummary(sess.ChannelID, errMsg)
-	sess.Messages = append(sess.Messages, session.ConversationMessage{
-		Role:    session.RoleTool,
-		Content: errMsg,
-	})
+	return a.summarizer.Summarize(ctx, sess)
 }
 
 // totalTokens estimates the total tokens in the system prompt plus all session messages.

@@ -29,6 +29,7 @@ type ConversationMessage struct {
 	ToolCalls        []ToolCall        `json:"tool_calls,omitempty"`
 	ToolCallID       string            `json:"tool_call_id,omitempty"`
 	Attachments      []ImageAttachment `json:"attachments,omitempty"`
+	Summary          bool              `json:"summary,omitempty"` // true when this message is a context summary
 }
 
 // ImageAttachment holds base64-encoded image data for inclusion in LLM vision requests.

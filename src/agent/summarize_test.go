@@ -105,7 +105,7 @@ func TestSummarizeContext_EmptyContentFallbackToReasoningContent(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// Verify the summary message was created with ReasoningContent as the summary text
+	// Verify the summary message was created with Content as the summary text
 	if len(sess.Messages) < 2 {
 		t.Fatalf("expected at least 2 messages after summarization, got %d", len(sess.Messages))
 	}
@@ -114,12 +114,15 @@ func TestSummarizeContext_EmptyContentFallbackToReasoningContent(t *testing.T) {
 	if summaryMsg.Role != session.RoleAssistant {
 		t.Errorf("summary message role = %s, want %s", summaryMsg.Role, session.RoleAssistant)
 	}
-	if summaryMsg.Content != "" {
-		t.Errorf("summary message Content = %q, want empty string", summaryMsg.Content)
-	}
 	expectedPrefix := "[Summary of prior conversation]\nThe conversation discusses a project plan with milestones and deadlines."
-	if summaryMsg.ReasoningContent != expectedPrefix {
-		t.Errorf("summary message ReasoningContent = %q, want %q", summaryMsg.ReasoningContent, expectedPrefix)
+	if summaryMsg.Content != expectedPrefix {
+		t.Errorf("summary message Content = %q, want %q", summaryMsg.Content, expectedPrefix)
+	}
+	if summaryMsg.ReasoningContent != "" {
+		t.Errorf("summary message ReasoningContent = %q, want empty", summaryMsg.ReasoningContent)
+	}
+	if !summaryMsg.Summary {
+		t.Error("summary message Summary flag should be true")
 	}
 }
 
@@ -158,17 +161,20 @@ func TestSummarizeContext_MessageStructure(t *testing.T) {
 	if summaryMsg.Role != session.RoleAssistant {
 		t.Errorf("summary Role = %q, want %q", summaryMsg.Role, session.RoleAssistant)
 	}
-	if summaryMsg.Content != "" {
-		t.Errorf("summary Content = %q, want empty string", summaryMsg.Content)
-	}
 	expectedPrefix := "[Summary of prior conversation]\n"
-	if !strings.HasPrefix(summaryMsg.ReasoningContent, expectedPrefix) {
-		t.Errorf("summary ReasoningContent missing prefix: got %q", summaryMsg.ReasoningContent)
+	if !strings.HasPrefix(summaryMsg.Content, expectedPrefix) {
+		t.Errorf("summary Content missing prefix: got %q", summaryMsg.Content)
 	}
 	// Verify there is actual summary text after the prefix
-	summaryText := strings.TrimPrefix(summaryMsg.ReasoningContent, expectedPrefix)
+	summaryText := strings.TrimPrefix(summaryMsg.Content, expectedPrefix)
 	if summaryText == "" {
-		t.Error("summary ReasoningContent has no text after prefix")
+		t.Error("summary Content has no text after prefix")
+	}
+	if summaryMsg.ReasoningContent != "" {
+		t.Errorf("summary ReasoningContent = %q, want empty", summaryMsg.ReasoningContent)
+	}
+	if summaryMsg.Summary != true {
+		t.Error("summary Summary flag should be true")
 	}
 	if len(summaryMsg.ToolCalls) > 0 {
 		t.Errorf("summary message should not have ToolCalls, got %d", len(summaryMsg.ToolCalls))
@@ -246,11 +252,11 @@ func TestSummarizeContext_AttachmentProtectedMessages(t *testing.T) {
 	if summaryMsg.Role != session.RoleAssistant {
 		t.Errorf("summary Role = %q, want %q", summaryMsg.Role, session.RoleAssistant)
 	}
-	if summaryMsg.Content != "" {
-		t.Errorf("summary Content = %q, want empty", summaryMsg.Content)
+	if !strings.HasPrefix(summaryMsg.Content, "[Summary of prior conversation]\n") {
+		t.Errorf("summary Content missing prefix: %q", summaryMsg.Content)
 	}
-	if !strings.HasPrefix(summaryMsg.ReasoningContent, "[Summary of prior conversation]\n") {
-		t.Errorf("summary ReasoningContent missing prefix: %q", summaryMsg.ReasoningContent)
+	if !summaryMsg.Summary {
+		t.Error("summary Summary flag should be true")
 	}
 
 	// Verify the message with attachment (index 5) is NOT preserved in recent —
@@ -351,11 +357,11 @@ func TestSummarizeContext_ChannelLoggerEntries(t *testing.T) {
 	if summaryMsg.Role != session.RoleAssistant {
 		t.Errorf("summary Role = %q, want %q", summaryMsg.Role, session.RoleAssistant)
 	}
-	if summaryMsg.Content != "" {
-		t.Errorf("summary Content = %q, want empty", summaryMsg.Content)
+	if !strings.HasPrefix(summaryMsg.Content, "[Summary of prior conversation]\n") {
+		t.Errorf("summary Content missing prefix: %q", summaryMsg.Content)
 	}
-	if !strings.HasPrefix(summaryMsg.ReasoningContent, "[Summary of prior conversation]\n") {
-		t.Errorf("summary ReasoningContent missing prefix: %q", summaryMsg.ReasoningContent)
+	if !summaryMsg.Summary {
+		t.Error("summary Summary flag should be true")
 	}
 
 	// Verify the channel log file exists and has the expected entries
