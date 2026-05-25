@@ -65,5 +65,28 @@
 
 ---
 
+**12-parameter constructor.** `agent.New()` takes twelve arguments:
+
+```go
+func New(client ChatClient, reg *tools.Registry,
+    maxToolIterations, contextTokens int,
+    summarizeThreshold float64, summarizeKeepRecent, maxTokens int,
+    summaryPrompt string,
+    logToolCalls, logAgentReasoning bool,
+    channelLogger *channellog.Logger, logger *log.Logger) *Agent
+```
+
+That's not a constructor — it's a configuration object masquerading as a parameter list. Fowler would call this a "Large Class" and recommend a Builder pattern or a dedicated configuration struct.
+
+---
+
+**`summarizeContext` at 69 lines does five things:** logs, splits messages, calls the LLM, records errors, mutates state. It's a "God Fragment" — not yet a God Object, but close.
+
+---
+
+**`file_tools.go` at 683 lines with 13 functions** is a single concern (file operations) treated as one monolithic file rather than separate modules for `view`, `write`, `append`, `edit`, `ls`, `glob`, `grep`. Each of those could own its own package.
+
+---
+
 
 
