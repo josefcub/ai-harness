@@ -106,6 +106,22 @@ That's not a constructor — it's a configuration object masquerading as a param
     - [x] Message enqueued after worker starts mid-poll is eventually picked up
 
 ---
+## worker/worker_test.go
 
+- [ ] `worker_test.go:396-437` `TestWorker_ConcurrentSafety` — test quality issues:
+  - [ ] Dead code: `processed` (atomic.Int32) declared and unused via `_ = processed`
+  - [ ] Dead code: `origProcess` captured and unused via `_ = origProcess`
+  - [ ] Test replaces `w.processor` directly, bypassing constructor — tests internals not behavior
+
+---
+
+## main.go
+
+- [x] `main.go:25-182` `main()` — 157 lines. Acceptable for bootstrap, but has extractable concerns:
+  - [x] Shutdown drain loop (lines 161-170): extract to `drainPending(q, sessions, logger)` for testability
+
+---
+
+ß
 
 

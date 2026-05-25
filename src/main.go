@@ -156,17 +156,7 @@ func main() {
 
 	// Step 3: Drain the message queue — append pending messages to session state files.
 	// Do not call the LLM; this is solely to prevent message loss.
-	pending := q.Pending()
-	for _, msg := range pending {
-		if err := sessions.DrainAndSave(msg.ChannelID, msg.MessageText, msg.ImageAttachment); err != nil {
-			logger.Error("failed to drain message to session",
-				"channel", msg.ChannelID,
-				"error", err.Error(),
-			)
-		} else {
-			logger.Info("drained pending message to session", "channel", msg.ChannelID)
-		}
-	}
+	drainPending(q, sessions, logger)
 
 	// Step 4: Flush all session state to disk atomically
 	if err := sessions.SaveAll(); err != nil {

@@ -4,22 +4,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ---
 
-## worker/worker_test.go
-
-- [ ] `worker_test.go:396-437` `TestWorker_ConcurrentSafety` — test quality issues:
-  - [ ] Dead code: `processed` (atomic.Int32) declared and unused via `_ = processed`
-  - [ ] Dead code: `origProcess` captured and unused via `_ = origProcess`
-  - [ ] Test replaces `w.processor` directly, bypassing constructor — tests internals not behavior
-
----
-
-## main.go
-
-- [ ] `main.go:25-182` `main()` — 157 lines. Acceptable for bootstrap, but has extractable concerns:
-  - [ ] Shutdown drain loop (lines 161-170): extract to `drainPending(q, sessions, logger)` for testability
-
----
-
 ## main_test.go
 
 - [ ] `main_test.go` — missing behavioral tests:
