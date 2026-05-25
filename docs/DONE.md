@@ -101,6 +101,11 @@ That's not a constructor — it's a configuration object masquerading as a param
     - [x] Duplicated session save + error log (lines 140-148 vs 152-159) — extract `saveSession(sess)`
     - [x] Duplicated callback send structure (lines 132-138 vs 162-170) — extract `sendCallback()`
 
+- [x] `worker.go:85-106` `Run()` — worker poll loop.
+  - It contains the following behaviors, each one of which needs to be tested:
+    - [x] Message enqueued after worker starts mid-poll is eventually picked up
+
+---
 
 
 

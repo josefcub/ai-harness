@@ -4,14 +4,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ---
 
-## worker/worker.go
-
-- [ ] `worker.go:85-106` `Run()` — worker poll loop.
-  - It contains the following behaviors, each one of which needs to be tested:
-    - [ ] Message enqueued after worker starts mid-poll is eventually picked up
-
----
-
 ## worker/worker_test.go
 
 - [ ] `worker_test.go:396-437` `TestWorker_ConcurrentSafety` — test quality issues:

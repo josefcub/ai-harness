@@ -64,6 +64,50 @@ func (m *mockProcessor) GetCalls() []string {
 	return calls
 }
 
+// blockingProcessor implements Processor for tests that need to control
+// when processing completes, enabling messages to be enqueued mid-poll.
+// Process() blocks on blockCh after signaling. Closing unblocks all calls.
+type blockingProcessor struct {
+	calls    []string
+	response string
+	blockCh  chan struct{} // closed to unblock all waiting calls
+	calling  chan struct{} // signaled when Process() is entered (buffered)
+	callsMu  *sync.Mutex
+	callsPtr *[]string
+}
+
+func (b *blockingProcessor) Process(ctx context.Context, sess *session.Session, messageText, systemPrompt string, imageAtt session.ImageAttachment) (string, error) {
+	b.callsMu.Lock()
+	b.calls = append(b.calls, messageText)
+	b.callsMu.Unlock()
+
+	// Record the call for test assertions
+	b.callsMu.Lock()
+	*b.callsPtr = append(*b.callsPtr, messageText)
+	b.callsMu.Unlock()
+
+	// Signal that we've entered Process()
+	select {
+	case b.calling <- struct{}{}:
+	default:
+	}
+
+	// Block until unblocked (both calls block here; closing unblocks all)
+	<-b.blockCh
+
+	sess.Messages = append(sess.Messages, session.ConversationMessage{
+		Role:    session.RoleUser,
+		Content: messageText,
+	})
+
+	sess.Messages = append(sess.Messages, session.ConversationMessage{
+		Role:    session.RoleAssistant,
+		Content: b.response,
+	})
+
+	return b.response, nil
+}
+
 func newTestWorker(t *testing.T, processor Processor, workingDir string) (*Worker, *queue.Queue, *session.Manager) {
 	t.Helper()
 
@@ -200,6 +244,81 @@ func TestWorker_CallbackDelivery(t *testing.T) {
 	}
 	if receivedCallback.Message != "callback response" {
 		t.Errorf("callback message = %q, want %q", receivedCallback.Message, "callback response")
+	}
+}
+
+func TestWorker_MessageEnqueuedMidPoll(t *testing.T) {
+	// Tests that a message enqueued while the worker is mid-poll (between Dequeue()
+	// calls) is eventually picked up. This verifies the poll loop correctly re-checks
+	// the queue on each iteration.
+	blockCh := make(chan struct{})
+	calling := make(chan struct{}, 2)
+	var callsMu sync.Mutex
+	var calls []string
+
+	proc := &blockingProcessor{
+		blockCh:  blockCh,
+		calling:  calling,
+		callsMu:  &callsMu,
+		callsPtr: &calls,
+		response: "ok",
+	}
+
+	w, q, _ := newTestWorker(t, proc, t.TempDir())
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+
+	// Enqueue first message — processor will block on blockCh
+	q.Enqueue(queue.Message{
+		ChannelID:   "ch-mid",
+		MessageText: "first",
+	})
+
+	// Wait for first message to start processing
+	select {
+	case <-calling:
+		// first message entered Process(), now blocked on blockCh
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first message to start processing")
+	}
+
+	// Enqueue second message while first is being processed.
+	// The worker is in processMessage() and will not call Dequeue() again
+	// until the first message finishes. This second message must be
+	// picked up on the next poll iteration.
+	q.Enqueue(queue.Message{
+		ChannelID:   "ch-mid-2",
+		MessageText: "second",
+	})
+
+	// Unblock the processor so both messages can complete.
+	close(blockCh)
+
+	// Wait for the second message to be processed.
+	// (First signal already received above.)
+	select {
+	case <-calling:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for second message to be processed")
+	}
+
+	cancel()
+	<-done
+
+	callsMu.Lock()
+	defer callsMu.Unlock()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 calls, got %d", len(calls))
+	}
+	if calls[0] != "first" || calls[1] != "second" {
+		t.Errorf("calls = %q, %q; want %q, %q", calls[0], calls[1], "first", "second")
 	}
 }
 
