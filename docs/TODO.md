@@ -4,20 +4,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ---
 
-## agent/agent.go
-
-- [ ] `agent.go:455-528` `convertMessage()` / `toMultimodalMessage()` — message conversion.
-  - It contains the following behaviors, each one of which needs to be tested:
-    - [ ] convertMessage with ToolCallID set
-    - [ ] convertMessage with both ToolCalls and ToolCallID
-    - [ ] toMultimodalMessage with empty Content (image-only)
-    - [ ] toMultimodalMessage with multiple attachments
-    - [ ] toMultimodalMessage with tool calls + attachments
-  - Code quality issues:
-    - [ ] Duplicated tool-call conversion: lines 465-474 and 511-520 are identical — extract shared `convertToolCallsToLLM()`
-
----
-
 ## agent/agent_test.go
 
 - [ ] `agent_test.go` — existing tests use surface assertions (`err == nil`, output string prefix checks) rather than deep data-structure verification. All tests should verify returned fields, message roles, tool call IDs, and session state.

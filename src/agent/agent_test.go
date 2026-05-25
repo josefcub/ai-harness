@@ -1680,3 +1680,312 @@ func TestParseToolResult_AttachmentMissingFields(t *testing.T) {
 		t.Errorf("expected zero-mime_type, got %q", attachments[0].MIMEType)
 	}
 }
+
+// --- Message conversion tests ---
+
+func TestConvertMessage_ToolCallID(t *testing.T) {
+	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+
+	msg := session.ConversationMessage{
+		Role:       session.RoleTool,
+		Content:    "tool output here",
+		ToolCallID: "call_abc123",
+	}
+
+	result := agent.convertMessage(msg)
+
+	if result.Role != "tool" {
+		t.Errorf("expected role 'tool', got %q", result.Role)
+	}
+
+	var contentStr string
+	if err := json.Unmarshal(result.Content, &contentStr); err != nil {
+		t.Fatalf("invalid content JSON: %v", err)
+	}
+	if contentStr != "tool output here" {
+		t.Errorf("expected content 'tool output here', got %q", contentStr)
+	}
+
+	if result.ToolCallID != "call_abc123" {
+		t.Errorf("expected ToolCallID 'call_abc123', got %q", result.ToolCallID)
+	}
+
+	if result.ToolCalls != nil {
+		t.Errorf("expected nil ToolCalls, got %d", len(result.ToolCalls))
+	}
+}
+
+func TestConvertMessage_ToolCallsAndToolCallID(t *testing.T) {
+	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+
+	msg := session.ConversationMessage{
+		Role:       session.RoleAssistant,
+		Content:    "calling a tool",
+		ToolCallID: "call_xyz",
+		ToolCalls: []session.ToolCall{
+			{ID: "call_1", Type: "function", Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Name: "echo", Arguments: `{"text":"hi"}`}},
+			{ID: "call_2", Type: "function", Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Name: "view", Arguments: `{"path":"f.md"}`}},
+		},
+	}
+
+	result := agent.convertMessage(msg)
+
+	if result.Role != "assistant" {
+		t.Errorf("expected role 'assistant', got %q", result.Role)
+	}
+
+	if result.ToolCallID != "call_xyz" {
+		t.Errorf("expected ToolCallID 'call_xyz', got %q", result.ToolCallID)
+	}
+
+	if len(result.ToolCalls) != 2 {
+		t.Fatalf("expected 2 tool calls, got %d", len(result.ToolCalls))
+	}
+
+	if result.ToolCalls[0].ID != "call_1" || result.ToolCalls[0].Function.Name != "echo" {
+		t.Errorf("tool call 0: got %+v", result.ToolCalls[0])
+	}
+	if result.ToolCalls[1].ID != "call_2" || result.ToolCalls[1].Function.Name != "view" {
+		t.Errorf("tool call 1: got %+v", result.ToolCalls[1])
+	}
+}
+
+func TestConvertMessage_PureText(t *testing.T) {
+	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+
+	msg := session.ConversationMessage{
+		Role:             session.RoleUser,
+		Content:          "Hello world",
+		ReasoningContent: "thinking silently",
+	}
+
+	result := agent.convertMessage(msg)
+
+	if result.Role != "user" {
+		t.Errorf("expected role 'user', got %q", result.Role)
+	}
+
+	var contentStr string
+	if err := json.Unmarshal(result.Content, &contentStr); err != nil {
+		t.Fatalf("invalid content JSON: %v", err)
+	}
+	if contentStr != "Hello world" {
+		t.Errorf("expected content 'Hello world', got %q", contentStr)
+	}
+
+	if result.ReasoningContent != "thinking silently" {
+		t.Errorf("expected reasoning 'thinking silently', got %q", result.ReasoningContent)
+	}
+
+	if result.ToolCallID != "" {
+		t.Errorf("expected empty ToolCallID, got %q", result.ToolCallID)
+	}
+	if result.ToolCalls != nil {
+		t.Errorf("expected nil ToolCalls, got %d", len(result.ToolCalls))
+	}
+}
+
+func TestConvertMessage_Empty(t *testing.T) {
+	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+
+	msg := session.ConversationMessage{
+		Role: session.RoleUser,
+	}
+
+	result := agent.convertMessage(msg)
+
+	if result.Role != "user" {
+		t.Errorf("expected role 'user', got %q", result.Role)
+	}
+
+	var contentStr string
+	if err := json.Unmarshal(result.Content, &contentStr); err != nil {
+		t.Fatalf("invalid content JSON: %v", err)
+	}
+	if contentStr != "" {
+		t.Errorf("expected empty content, got %q", contentStr)
+	}
+}
+
+func TestToMultimodalMessage_ImageOnly(t *testing.T) {
+	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+
+	msg := session.ConversationMessage{
+		Role: session.RoleUser,
+		Attachments: []session.ImageAttachment{
+			{Data: "aW1hZ2VkYXRh", MIMEType: "image/png"},
+		},
+	}
+
+	result := agent.toMultimodalMessage(msg)
+
+	if result.Role != "user" {
+		t.Errorf("expected role 'user', got %q", result.Role)
+	}
+
+	var parts []map[string]interface{}
+	if err := json.Unmarshal(result.Content, &parts); err != nil {
+		t.Fatalf("invalid content JSON: %v", err)
+	}
+
+	if len(parts) != 1 {
+		t.Fatalf("expected 1 part, got %d", len(parts))
+	}
+
+	if parts[0]["type"] != "image_url" {
+		t.Errorf("expected part type 'image_url', got %q", parts[0]["type"])
+	}
+
+	imgURL, ok := parts[0]["image_url"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected image_url to be a map")
+	}
+	if url, ok := imgURL["url"].(string); !ok || !strings.HasPrefix(url, "data:image/png;base64,") {
+		t.Errorf("expected data URI prefix, got %q", url)
+	}
+}
+
+func TestToMultimodalMessage_MultipleAttachments(t *testing.T) {
+	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+
+	msg := session.ConversationMessage{
+		Role:    session.RoleUser,
+		Content: "look at these",
+		Attachments: []session.ImageAttachment{
+			{Data: "aW1hZ2Ux", MIMEType: "image/png"},
+			{Data: "aW1hZ2Uy", MIMEType: "image/jpeg"},
+			{Data: "aW1hZ2Uz", MIMEType: "image/webp"},
+		},
+	}
+
+	result := agent.toMultimodalMessage(msg)
+
+	var parts []map[string]interface{}
+	if err := json.Unmarshal(result.Content, &parts); err != nil {
+		t.Fatalf("invalid content JSON: %v", err)
+	}
+
+	// 1 text part + 3 image parts = 4
+	if len(parts) != 4 {
+		t.Fatalf("expected 4 parts, got %d", len(parts))
+	}
+
+	// First part should be text
+	if parts[0]["type"] != "text" || parts[0]["text"] != "look at these" {
+		t.Errorf("expected text part, got %+v", parts[0])
+	}
+
+	// Remaining parts should be image_url
+	for i := 1; i <= 3; i++ {
+		if parts[i]["type"] != "image_url" {
+			t.Errorf("part %d: expected image_url, got %q", i, parts[i]["type"])
+		}
+	}
+}
+
+func TestToMultimodalMessage_ToolCallsAndAttachments(t *testing.T) {
+	agent := setupAgent(t, newMockClient(), 8192, 0.7, 10, 20, 4096, false, false)
+
+	msg := session.ConversationMessage{
+		Role:    session.RoleAssistant,
+		Content: "I see the image",
+		Attachments: []session.ImageAttachment{
+			{Data: "aW1hZ2VkYXRh", MIMEType: "image/png"},
+		},
+		ToolCalls: []session.ToolCall{
+			{ID: "call_1", Type: "function", Function: struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			}{Name: "view", Arguments: `{"path":"img.png"}`}},
+		},
+		ToolCallID: "call_prev",
+	}
+
+	result := agent.toMultimodalMessage(msg)
+
+	// Verify multimodal content
+	var parts []map[string]interface{}
+	if err := json.Unmarshal(result.Content, &parts); err != nil {
+		t.Fatalf("invalid content JSON: %v", err)
+	}
+	if len(parts) != 2 {
+		t.Fatalf("expected 2 parts (text + image), got %d", len(parts))
+	}
+	if parts[0]["type"] != "text" || parts[0]["text"] != "I see the image" {
+		t.Errorf("text part mismatch: %+v", parts[0])
+	}
+	if parts[1]["type"] != "image_url" {
+		t.Errorf("expected image_url part, got %q", parts[1]["type"])
+	}
+
+	// Verify tool call metadata applied
+	if result.ToolCallID != "call_prev" {
+		t.Errorf("expected ToolCallID 'call_prev', got %q", result.ToolCallID)
+	}
+	if len(result.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(result.ToolCalls))
+	}
+	if result.ToolCalls[0].ID != "call_1" || result.ToolCalls[0].Function.Name != "view" {
+		t.Errorf("tool call mismatch: %+v", result.ToolCalls[0])
+	}
+}
+
+func TestApplyToolCalls_NoToolCallsOrID(t *testing.T) {
+	msg := session.ConversationMessage{
+		Role:    session.RoleUser,
+		Content: "no tools here",
+	}
+
+	llmMsg := llm.NewTextMessage("user", msg.Content)
+	applyToolCalls(&llmMsg, msg)
+
+	if llmMsg.ToolCallID != "" {
+		t.Errorf("expected empty ToolCallID, got %q", llmMsg.ToolCallID)
+	}
+	if llmMsg.ToolCalls != nil {
+		t.Errorf("expected nil ToolCalls, got %d", len(llmMsg.ToolCalls))
+	}
+}
+
+func TestApplyToolCalls_OnlyToolCallID(t *testing.T) {
+	msg := session.ConversationMessage{
+		Role:       session.RoleTool,
+		Content:    "result",
+		ToolCallID: "call_id_only",
+	}
+
+	llmMsg := llm.NewTextMessage("tool", msg.Content)
+	applyToolCalls(&llmMsg, msg)
+
+	if llmMsg.ToolCallID != "call_id_only" {
+		t.Errorf("expected ToolCallID 'call_id_only', got %q", llmMsg.ToolCallID)
+	}
+	if llmMsg.ToolCalls != nil {
+		t.Errorf("expected nil ToolCalls, got %d", len(llmMsg.ToolCalls))
+	}
+}
+
+func TestApplyToolCalls_EmptyToolCallsSlice(t *testing.T) {
+	msg := session.ConversationMessage{
+		Role:       session.RoleAssistant,
+		Content:    "empty calls",
+		ToolCalls:  []session.ToolCall{},
+		ToolCallID: "call_id",
+	}
+
+	llmMsg := llm.NewTextMessage("assistant", msg.Content)
+	applyToolCalls(&llmMsg, msg)
+
+	if llmMsg.ToolCallID != "call_id" {
+		t.Errorf("expected ToolCallID 'call_id', got %q", llmMsg.ToolCallID)
+	}
+	if llmMsg.ToolCalls != nil {
+		t.Errorf("expected nil ToolCalls for empty slice, got %d", len(llmMsg.ToolCalls))
+	}
+}

@@ -45,5 +45,14 @@
     - [x] JSON with `__attachment` but no `text` field returns `""` + attachment
     - [x] Invalid `__attachment` JSON (marshal/unmarshal error) returns raw result
 
+- [x] `agent.go:455-528` `convertMessage()` / `toMultimodalMessage()` — message conversion.
+  - It contains the following behaviors, each one of which needs to be tested:
+    - [x] convertMessage with ToolCallID set
+    - [x] convertMessage with both ToolCalls and ToolCallID
+    - [x] toMultimodalMessage with empty Content (image-only)
+    - [x] toMultimodalMessage with multiple attachments
+    - [x] toMultimodalMessage with tool calls + attachments
+  - Code quality issues:
+    - [x] Duplicated tool-call conversion: lines 465-474 and 511-520 are identical — extract shared `convertToolCallsToLLM()`
 
 

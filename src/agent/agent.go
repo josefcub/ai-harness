@@ -483,6 +483,16 @@ func (a *Agent) toLLMMessages(sess *session.Session, systemPrompt string) []llm.
 	return msgs
 }
 
+// applyToolCalls applies tool call metadata to an LLM message from a session message.
+func applyToolCalls(llmMsg *llm.Message, msg session.ConversationMessage) {
+	if len(msg.ToolCalls) > 0 {
+		llmMsg.ToolCalls = convertSessionToolCalls(msg.ToolCalls)
+	}
+	if msg.ToolCallID != "" {
+		llmMsg.ToolCallID = msg.ToolCallID
+	}
+}
+
 // convertMessage converts a session message to an LLM API message.
 func (a *Agent) convertMessage(msg session.ConversationMessage) llm.Message {
 	// Check if this message has image attachments — if so, use multimodal content
@@ -494,13 +504,7 @@ func (a *Agent) convertMessage(msg session.ConversationMessage) llm.Message {
 	llmMsg := llm.NewTextMessage(string(msg.Role), msg.Content)
 	llmMsg.ReasoningContent = msg.ReasoningContent
 
-	if len(msg.ToolCalls) > 0 {
-		llmMsg.ToolCalls = convertSessionToolCalls(msg.ToolCalls)
-	}
-
-	if msg.ToolCallID != "" {
-		llmMsg.ToolCallID = msg.ToolCallID
-	}
+	applyToolCalls(&llmMsg, msg)
 
 	return llmMsg
 }
@@ -532,13 +536,7 @@ func (a *Agent) toMultimodalMessage(msg session.ConversationMessage) llm.Message
 		ReasoningContent: msg.ReasoningContent,
 	}
 
-	if len(msg.ToolCalls) > 0 {
-		llmMsg.ToolCalls = convertSessionToolCalls(msg.ToolCalls)
-	}
-
-	if msg.ToolCallID != "" {
-		llmMsg.ToolCallID = msg.ToolCallID
-	}
+	applyToolCalls(&llmMsg, msg)
 
 	return llmMsg
 }
