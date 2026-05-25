@@ -2,6 +2,8 @@
 
 ## This file tracks what items have been completed from TODO.md by removing them from TODO.md
 
+# src/agent.go:
+
 - [x] `agent.go:62-233` `Process()` — 172 lines, handles user message creation, channel logging, tool-call loop, LLM calls, tool execution, output accumulation, session state management, summarization triggering, and synthetic closing message generation.
   - It contains the following behaviors, each one of which needs to be tested:
     - [x] ReasoningContent recorded in session on normal (non-error) response
@@ -54,5 +56,14 @@
     - [x] toMultimodalMessage with tool calls + attachments
   - Code quality issues:
     - [x] Duplicated tool-call conversion: lines 465-474 and 511-520 are identical — extract shared `convertToolCallsToLLM()`
+
+---
+
+## agent/agent_test.go
+
+- [x] `agent_test.go` — existing tests use surface assertions (`err == nil`, output string prefix checks) rather than deep data-structure verification. All tests should verify returned fields, message roles, tool call IDs, and session state.
+
+---
+
 
 

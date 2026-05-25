@@ -109,7 +109,6 @@ func setupAgent(t *testing.T, mc *mockClient, contextTokens int, summarizeThresh
 }
 
 func TestProcessPlainTextResponse(t *testing.T) {
-
 	mc := newMockClient()
 	mc.QueueResponse(&llm.ChatResponse{
 		Content:   "This is the final answer.",
@@ -127,18 +126,30 @@ func TestProcessPlainTextResponse(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	if !strings.Contains(output, "This is the final answer.") {
-		t.Errorf("expected output to contain answer, got: %s", output)
+	// Verify exact output
+	if output != "This is the final answer." {
+		t.Errorf("expected exact output %q, got %q", "This is the final answer.", output)
 	}
 
-	// Should have user message + assistant message
+	// Verify session structure: user message + assistant message
 	if len(sess.Messages) != 2 {
-		t.Errorf("expected 2 messages, got %d", len(sess.Messages))
+		t.Fatalf("expected 2 messages, got %d", len(sess.Messages))
+	}
+	if sess.Messages[0].Role != session.RoleUser || sess.Messages[0].Content != "What is 2+2?" {
+		t.Errorf("message[0] expected user 'What is 2+2?', got %+v", sess.Messages[0])
+	}
+	if sess.Messages[1].Role != session.RoleAssistant {
+		t.Errorf("message[1] expected role assistant, got %s", sess.Messages[1].Role)
+	}
+	if sess.Messages[1].Content != "This is the final answer." {
+		t.Errorf("message[1] expected content 'This is the final answer.', got %q", sess.Messages[1].Content)
+	}
+	if sess.Messages[1].ToolCalls != nil {
+		t.Errorf("message[1] expected nil ToolCalls, got %v", sess.Messages[1].ToolCalls)
 	}
 }
 
 func TestProcessToolCallLoop(t *testing.T) {
-
 	mc := newMockClient()
 
 	// First call: LLM decides to call "echo"
@@ -167,68 +178,62 @@ func TestProcessToolCallLoop(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// Output should contain tool call and result markers
-	if !strings.Contains(output, "[Tool Call: echo]") {
-		t.Errorf("expected tool call in output, got: %s", output)
-	}
-	if !strings.Contains(output, "[Result: hello world]") {
-		t.Errorf("expected tool result in output, got: %s", output)
-	}
-	if !strings.Contains(output, "The echoed result is: hello world") {
-		t.Errorf("expected final answer in output, got: %s", output)
-	}
-
-	// Verify session has correct message sequence: user, assistant(tool_call), tool, assistant(final)
+	// Verify session structure: user, assistant(tool_call), tool, assistant(final) = 4
 	if len(sess.Messages) != 4 {
-		t.Errorf("expected 4 messages in session, got %d: %+v", len(sess.Messages), sess.Messages)
-	}
-}
-
-func TestProcessMaxIterations(t *testing.T) {
-
-	mc := newMockClient()
-
-	// LLM keeps calling tools — should stop at max_tool_iterations
-	for i := 0; i < 5; i++ {
-		resp := &llm.ChatResponse{
-			Content: "",
-			ToolCalls: []llm.ToolCall{
-				{ID: fmt.Sprintf("call_%d", i), Type: "function"},
-			},
-		}
-		resp.ToolCalls[0].Function.Name = "echo"
-		resp.ToolCalls[0].Function.Arguments = `{"text":"loop"}`
-		mc.QueueResponse(resp)
+		t.Fatalf("expected 4 messages, got %d", len(sess.Messages))
 	}
 
-	agent := setupAgent(t, mc, 8192, 0.70, 10, 3, 4096, true, true) // max 3 iterations
-	sess := &session.Session{
-		ChannelID: "test-channel",
-		Messages:  nil,
+	// Message 0: user
+	if sess.Messages[0].Role != session.RoleUser || sess.Messages[0].Content != "Echo hello world" {
+		t.Errorf("message[0] expected user 'Echo hello world', got %+v", sess.Messages[0])
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	_, err := agent.Process(ctx, sess, "Loop forever", "You are helpful.", session.ImageAttachment{})
-	if err != nil {
-		t.Fatalf("Process failed: %v", err)
+	// Message 1: assistant with tool call
+	if sess.Messages[1].Role != session.RoleAssistant {
+		t.Errorf("message[1] expected role assistant, got %s", sess.Messages[1].Role)
+	}
+	if len(sess.Messages[1].ToolCalls) != 1 {
+		t.Fatalf("message[1] expected 1 tool call, got %d", len(sess.Messages[1].ToolCalls))
+	}
+	if sess.Messages[1].ToolCalls[0].ID != "call_1" {
+		t.Errorf("message[1] expected tool call ID 'call_1', got %q", sess.Messages[1].ToolCalls[0].ID)
+	}
+	if sess.Messages[1].ToolCalls[0].Function.Name != "echo" {
+		t.Errorf("message[1] expected tool name 'echo', got %q", sess.Messages[1].ToolCalls[0].Function.Name)
+	}
+	// Verify exact tool call args
+	expectedArgs := `{"text":"hello world"}`
+	if sess.Messages[1].ToolCalls[0].Function.Arguments != expectedArgs {
+		t.Errorf("message[1] expected args %q, got %q", expectedArgs, sess.Messages[1].ToolCalls[0].Function.Arguments)
 	}
 
-	// Should have exactly 3 tool call rounds (3 iterations)
-	toolCallMsgs := 0
-	for _, msg := range sess.Messages {
-		if msg.Role == session.RoleAssistant && len(msg.ToolCalls) > 0 {
-			toolCallMsgs++
-		}
+	// Message 2: tool result
+	if sess.Messages[2].Role != session.RoleTool {
+		t.Errorf("message[2] expected role tool, got %s", sess.Messages[2].Role)
 	}
-	if toolCallMsgs != 3 {
-		t.Errorf("expected 3 tool-call assistant messages, got %d", toolCallMsgs)
+	if sess.Messages[2].Content != "hello world" {
+		t.Errorf("message[2] expected content 'hello world', got %q", sess.Messages[2].Content)
+	}
+	if sess.Messages[2].ToolCallID != "call_1" {
+		t.Errorf("message[2] expected ToolCallID 'call_1', got %q", sess.Messages[2].ToolCallID)
+	}
+
+	// Message 3: final assistant
+	if sess.Messages[3].Role != session.RoleAssistant {
+		t.Errorf("message[3] expected role assistant, got %s", sess.Messages[3].Role)
+	}
+	if sess.Messages[3].Content != "The echoed result is: hello world" {
+		t.Errorf("message[3] expected content 'The echoed result is: hello world', got %q", sess.Messages[3].Content)
+	}
+
+	// Verify exact output structure
+	expectedOutput := "\n[Tool Call: echo]\n[Result: hello world]\nThe echoed result is: hello world"
+	if output != expectedOutput {
+		t.Errorf("expected output %q, got %q", expectedOutput, output)
 	}
 }
 
 func TestProcessMaxIterationsSyntheticClosing(t *testing.T) {
-
 	mc := newMockClient()
 
 	// LLM keeps calling tools — exceeds max_tool_iterations (3)
@@ -258,32 +263,62 @@ func TestProcessMaxIterationsSyntheticClosing(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// Output should contain the synthetic closing message
-	if !strings.Contains(output, "I reached my tool call limit this turn") {
-		t.Errorf("expected synthetic closing message in output, got: %s", output)
+	// Verify exact message count: 1 user + 3 assistant(tool) + 3 tool results + 1 synthetic = 8
+	if len(sess.Messages) != 8 {
+		t.Fatalf("expected 8 messages, got %d", len(sess.Messages))
 	}
 
-	// Last session message should be the synthetic assistant message
-	lastMsg := sess.LastMessage()
-	if lastMsg == nil {
-		t.Fatal("expected last message, got nil")
+	// Message 0: user
+	if sess.Messages[0].Role != session.RoleUser || sess.Messages[0].Content != "Loop forever" {
+		t.Errorf("message[0] mismatch: %+v", sess.Messages[0])
 	}
+
+	// Messages 1,3,5: assistant with tool calls (call_0, call_1, call_2)
+	// Messages 2,4,6: tool results
+	for i := 0; i < 3; i++ {
+		assistantIdx := 1 + i*2
+		toolIdx := 2 + i*2
+
+		if sess.Messages[assistantIdx].Role != session.RoleAssistant {
+			t.Errorf("message[%d] expected role assistant, got %s", assistantIdx, sess.Messages[assistantIdx].Role)
+		}
+		expectedID := fmt.Sprintf("call_%d", i)
+		if len(sess.Messages[assistantIdx].ToolCalls) != 1 {
+			t.Fatalf("message[%d] expected 1 tool call, got %d", assistantIdx, len(sess.Messages[assistantIdx].ToolCalls))
+		}
+		if sess.Messages[assistantIdx].ToolCalls[0].ID != expectedID {
+			t.Errorf("message[%d] expected tool call ID %q, got %q", assistantIdx, expectedID, sess.Messages[assistantIdx].ToolCalls[0].ID)
+		}
+		if sess.Messages[assistantIdx].ToolCalls[0].Function.Name != "echo" {
+			t.Errorf("message[%d] expected tool name 'echo', got %q", assistantIdx, sess.Messages[assistantIdx].ToolCalls[0].Function.Name)
+		}
+
+		if sess.Messages[toolIdx].Role != session.RoleTool {
+			t.Errorf("message[%d] expected role tool, got %s", toolIdx, sess.Messages[toolIdx].Role)
+		}
+		if sess.Messages[toolIdx].ToolCallID != expectedID {
+			t.Errorf("message[%d] expected ToolCallID %q, got %q", toolIdx, expectedID, sess.Messages[toolIdx].ToolCallID)
+		}
+	}
+
+	// Message 7: synthetic closing assistant message
+	lastMsg := sess.Messages[7]
 	if lastMsg.Role != session.RoleAssistant {
-		t.Errorf("expected last message role=assistant, got %s", lastMsg.Role)
+		t.Errorf("message[7] expected role assistant, got %s", lastMsg.Role)
 	}
-	if !strings.Contains(lastMsg.Content, "tool call limit") {
-		t.Errorf("expected synthetic closing content, got: %s", lastMsg.Content)
+	expectedContent := "I reached my tool call limit this turn. Would you like me to continue?"
+	if lastMsg.Content != expectedContent {
+		t.Errorf("message[7] expected content %q, got %q", expectedContent, lastMsg.Content)
 	}
 
-	// Should have: 1 user + 3 tool-call assistant + 3 tool results + 1 synthetic closing = 8
-	expectedMsgs := 8
-	if len(sess.Messages) != expectedMsgs {
-		t.Errorf("expected %d messages, got %d", expectedMsgs, len(sess.Messages))
+	// Verify exact output structure with all tool calls, results, and synthetic closing
+	expectedOutput := "\n[Tool Call: echo]\n[Result: loop]\n\n[Tool Call: echo]\n[Result: loop]\n\n[Tool Call: echo]\n[Result: loop]\n\nI reached my tool call limit this turn. Would you like me to continue?"
+	if output != expectedOutput {
+		t.Errorf("expected output %q, got %q", expectedOutput, output)
 	}
 }
 
 func TestProcessMaxIterationsNormalExitUnaffected(t *testing.T) {
-
 	mc := newMockClient()
 
 	// LLM calls a tool once, then gives final answer — no exhaustion
@@ -310,20 +345,60 @@ func TestProcessMaxIterationsNormalExitUnaffected(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// Should NOT contain synthetic closing message
-	if strings.Contains(output, "tool call limit") {
-		t.Errorf("unexpected synthetic closing message in normal exit: %s", output)
+	// Verify exact message count: 1 user + 1 assistant(tool) + 1 tool result + 1 assistant(final) = 4
+	if len(sess.Messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(sess.Messages))
 	}
 
-	// Last message should be the real "Done." assistant message
-	lastMsg := sess.LastMessage()
-	if lastMsg == nil || lastMsg.Content != "Done." {
-		t.Errorf("expected last message to be 'Done.', got %+v", lastMsg)
+	// Message 0: user
+	if sess.Messages[0].Role != session.RoleUser || sess.Messages[0].Content != "Say hello" {
+		t.Errorf("message[0] mismatch: %+v", sess.Messages[0])
+	}
+
+	// Message 1: assistant with tool call
+	if sess.Messages[1].Role != session.RoleAssistant {
+		t.Errorf("message[1] expected role assistant, got %s", sess.Messages[1].Role)
+	}
+	if len(sess.Messages[1].ToolCalls) != 1 {
+		t.Fatalf("message[1] expected 1 tool call, got %d", len(sess.Messages[1].ToolCalls))
+	}
+	if sess.Messages[1].ToolCalls[0].ID != "call_1" {
+		t.Errorf("message[1] expected tool call ID 'call_1', got %q", sess.Messages[1].ToolCalls[0].ID)
+	}
+	if sess.Messages[1].ToolCalls[0].Function.Name != "echo" {
+		t.Errorf("message[1] expected tool name 'echo', got %q", sess.Messages[1].ToolCalls[0].Function.Name)
+	}
+
+	// Message 2: tool result
+	if sess.Messages[2].Role != session.RoleTool {
+		t.Errorf("message[2] expected role tool, got %s", sess.Messages[2].Role)
+	}
+	if sess.Messages[2].Content != "hello" {
+		t.Errorf("message[2] expected content 'hello', got %q", sess.Messages[2].Content)
+	}
+	if sess.Messages[2].ToolCallID != "call_1" {
+		t.Errorf("message[2] expected ToolCallID 'call_1', got %q", sess.Messages[2].ToolCallID)
+	}
+
+	// Message 3: final assistant
+	if sess.Messages[3].Role != session.RoleAssistant {
+		t.Errorf("message[3] expected role assistant, got %s", sess.Messages[3].Role)
+	}
+	if sess.Messages[3].Content != "Done." {
+		t.Errorf("message[3] expected content 'Done.', got %q", sess.Messages[3].Content)
+	}
+	if sess.Messages[3].ToolCalls != nil {
+		t.Errorf("message[3] expected nil ToolCalls, got %v", sess.Messages[3].ToolCalls)
+	}
+
+	// Verify exact output structure
+	expectedOutput := "\n[Tool Call: echo]\n[Result: hello]\nDone."
+	if output != expectedOutput {
+		t.Errorf("expected output %q, got %q", expectedOutput, output)
 	}
 }
 
 func TestProcessToolError(t *testing.T) {
-
 	mc := newMockClient()
 
 	// First call: LLM calls a non-existent tool (will error)
@@ -354,12 +429,53 @@ func TestProcessToolError(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// Tool error should be in output
-	if !strings.Contains(output, "unknown tool") {
-		t.Errorf("expected tool error in output, got: %s", output)
+	// Verify exact message count: 1 user + 1 assistant(tool=nonexistent) + 1 tool(error) + 1 assistant(recovery) = 4
+	if len(sess.Messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(sess.Messages))
 	}
-	if !strings.Contains(output, "I apologize for the error.") {
-		t.Errorf("expected recovery text in output, got: %s", output)
+
+	// Message 0: user
+	if sess.Messages[0].Role != session.RoleUser || sess.Messages[0].Content != "Do something" {
+		t.Errorf("message[0] mismatch: %+v", sess.Messages[0])
+	}
+
+	// Message 1: assistant with tool call to nonexistent tool
+	if sess.Messages[1].Role != session.RoleAssistant {
+		t.Errorf("message[1] expected role assistant, got %s", sess.Messages[1].Role)
+	}
+	if len(sess.Messages[1].ToolCalls) != 1 {
+		t.Fatalf("message[1] expected 1 tool call, got %d", len(sess.Messages[1].ToolCalls))
+	}
+	if sess.Messages[1].ToolCalls[0].ID != "call_err" {
+		t.Errorf("message[1] expected tool call ID 'call_err', got %q", sess.Messages[1].ToolCalls[0].ID)
+	}
+	if sess.Messages[1].ToolCalls[0].Function.Name != "nonexistent_tool" {
+		t.Errorf("message[1] expected tool name 'nonexistent_tool', got %q", sess.Messages[1].ToolCalls[0].Function.Name)
+	}
+
+	// Message 2: tool error result
+	if sess.Messages[2].Role != session.RoleTool {
+		t.Errorf("message[2] expected role tool, got %s", sess.Messages[2].Role)
+	}
+	if sess.Messages[2].Content != "unknown tool: nonexistent_tool" {
+		t.Errorf("message[2] expected content 'unknown tool: nonexistent_tool', got %q", sess.Messages[2].Content)
+	}
+	if sess.Messages[2].ToolCallID != "call_err" {
+		t.Errorf("message[2] expected ToolCallID 'call_err', got %q", sess.Messages[2].ToolCallID)
+	}
+
+	// Message 3: recovery assistant
+	if sess.Messages[3].Role != session.RoleAssistant {
+		t.Errorf("message[3] expected role assistant, got %s", sess.Messages[3].Role)
+	}
+	if sess.Messages[3].Content != "I apologize for the error." {
+		t.Errorf("message[3] expected content 'I apologize for the error.', got %q", sess.Messages[3].Content)
+	}
+
+	// Verify exact output structure
+	expectedOutput := "\n[Tool Call: nonexistent_tool]\n[Result: unknown tool: nonexistent_tool]\nI apologize for the error."
+	if output != expectedOutput {
+		t.Errorf("expected output %q, got %q", expectedOutput, output)
 	}
 }
 
@@ -378,8 +494,9 @@ func TestProcessLLMError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "connection refused") {
-		t.Errorf("expected 'connection refused' in error, got: %v", err)
+	expectedErr := "LLM call failed (iteration 0): connection refused"
+	if err.Error() != expectedErr {
+		t.Errorf("expected error %q, got %q", expectedErr, err.Error())
 	}
 
 	// Only user message in session — no partial response to record
@@ -407,16 +524,15 @@ func TestProcessPartialResponse(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "partial response") {
-		t.Errorf("expected 'partial response' in error, got: %v", err)
+	expectedErr := "LLM call interrupted (iteration 0, partial response saved): connection reset \u2014 partial response"
+	if err.Error() != expectedErr {
+		t.Errorf("expected error %q, got %q", expectedErr, err.Error())
 	}
 
-	// Partial content should be in output
-	if !strings.Contains(output, "This is a partial ") {
-		t.Errorf("expected partial content in output, got: %s", output)
-	}
-	if !strings.Contains(output, "thinking about it") {
-		t.Errorf("expected reasoning in output, got: %s", output)
+	// Verify exact output structure
+	expectedOutput := "[Reasoning: thinking about it]\nThis is a partial "
+	if output != expectedOutput {
+		t.Errorf("expected output %q, got %q", expectedOutput, output)
 	}
 
 	// Session should have: user message + partial assistant message
@@ -476,24 +592,42 @@ func TestSummarizationTriggersAtThreshold(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// Session should have: summary message + kept recent messages + new user + final assistant
-	// The old long messages should be replaced by the summary
-	hasSummary := false
-	for _, msg := range sess.Messages {
-		if msg.ReasoningContent != "" && strings.Contains(msg.ReasoningContent, "[Summary of prior conversation]") {
-			hasSummary = true
-			break
-		}
-	}
-	if !hasSummary {
-		t.Error("expected summary message in session")
+	// Session should have: summary + kept recent (2) + new user + final assistant = 4
+	if len(sess.Messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(sess.Messages))
 	}
 
-	// The old long messages should not be present directly
-	for _, msg := range sess.Messages {
-		if msg.Content == longText {
-			t.Error("expected old long message to be replaced by summary")
-		}
+	// Message 0: summary message
+	if sess.Messages[0].Role != session.RoleAssistant {
+		t.Errorf("message[0] expected role assistant, got %s", sess.Messages[0].Role)
+	}
+	expectedReasoningPrefix := "[Summary of prior conversation]"
+	if !strings.HasPrefix(sess.Messages[0].ReasoningContent, expectedReasoningPrefix) {
+		t.Errorf("message[0] expected ReasoningContent to start with %q, got %q", expectedReasoningPrefix, sess.Messages[0].ReasoningContent)
+	}
+
+	// Message 1: kept recent assistant (old assistant, not summarized)
+	if sess.Messages[1].Role != session.RoleAssistant {
+		t.Errorf("message[1] expected role assistant, got %s", sess.Messages[1].Role)
+	}
+	if sess.Messages[1].Content != strings.Repeat("y", 500) {
+		t.Errorf("message[1] expected content %q, got %q", strings.Repeat("y", 500), sess.Messages[1].Content)
+	}
+
+	// Message 2: new user message
+	if sess.Messages[2].Role != session.RoleUser {
+		t.Errorf("message[2] expected role user, got %s", sess.Messages[2].Role)
+	}
+	if sess.Messages[2].Content != "New message" {
+		t.Errorf("message[2] expected content 'New message', got %q", sess.Messages[2].Content)
+	}
+
+	// Message 3: final assistant
+	if sess.Messages[3].Role != session.RoleAssistant {
+		t.Errorf("message[3] expected role assistant, got %s", sess.Messages[3].Role)
+	}
+	if sess.Messages[3].Content != "Short answer." {
+		t.Errorf("message[3] expected content 'Short answer.', got %q", sess.Messages[3].Content)
 	}
 }
 
@@ -528,20 +662,37 @@ func TestSummarizationFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error from summarization failure, got nil")
 	}
-	if !strings.Contains(err.Error(), "context summarization failed") {
-		t.Errorf("expected 'context summarization failed' in error, got: %v", err)
+	expectedErr := "context summarization failed: context summarization LLM error"
+	if err.Error() != expectedErr {
+		t.Errorf("expected error %q, got %q", expectedErr, err.Error())
 	}
 
-	// Session should have a tool message recording the failure
-	hasFailureMsg := false
-	for _, msg := range sess.Messages {
-		if msg.Role == session.RoleTool && strings.Contains(msg.Content, "context summarization failed") {
-			hasFailureMsg = true
-			break
-		}
+	// Session should have: 2 old messages + new user message + tool error message = 4
+	if len(sess.Messages) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(sess.Messages))
 	}
-	if !hasFailureMsg {
-		t.Error("expected tool message recording summarization failure")
+
+	// Message 0: old user message
+	if sess.Messages[0].Role != session.RoleUser || sess.Messages[0].Content != longText {
+		t.Errorf("message[0] mismatch: %+v", sess.Messages[0])
+	}
+
+	// Message 1: old assistant message
+	if sess.Messages[1].Role != session.RoleAssistant || sess.Messages[1].Content != strings.Repeat("y", 500) {
+		t.Errorf("message[1] mismatch: %+v", sess.Messages[1])
+	}
+
+	// Message 2: new user message
+	if sess.Messages[2].Role != session.RoleUser || sess.Messages[2].Content != "New message" {
+		t.Errorf("message[2] mismatch: %+v", sess.Messages[2])
+	}
+
+	// Message 3: tool error message recording summarization failure
+	if sess.Messages[3].Role != session.RoleTool {
+		t.Errorf("message[3] expected role tool, got %s", sess.Messages[3].Role)
+	}
+	if sess.Messages[3].Content != expectedErr {
+		t.Errorf("message[3] expected content %q, got %q", expectedErr, sess.Messages[3].Content)
 	}
 }
 
@@ -568,6 +719,20 @@ func TestSummarizationSkippedWhenUnderThreshold(t *testing.T) {
 	// Only one LLM call should have been made (no summarization)
 	if mc.callCount != 1 {
 		t.Errorf("expected 1 LLM call (no summarization), got %d", mc.callCount)
+	}
+
+	// Verify session structure: user + assistant = 2
+	if len(sess.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(sess.Messages))
+	}
+	if sess.Messages[0].Role != session.RoleUser || sess.Messages[0].Content != "Hello" {
+		t.Errorf("message[0] mismatch: %+v", sess.Messages[0])
+	}
+	if sess.Messages[1].Role != session.RoleAssistant {
+		t.Errorf("message[1] expected role assistant, got %s", sess.Messages[1].Role)
+	}
+	if sess.Messages[1].Content != "Done." {
+		t.Errorf("message[1] expected content 'Done.', got %q", sess.Messages[1].Content)
 	}
 }
 
@@ -699,15 +864,56 @@ func TestMultipleToolCallsInOneTurn(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// Both tool results should be in output
-	if !strings.Contains(output, "[Result: first]") {
-		t.Errorf("missing first result in output: %s", output)
+	// Verify exact output structure with both tool calls, results, and final answer
+	expectedOutput := "\n[Tool Call: echo]\n[Result: first]\n\n[Tool Call: echo]\n[Result: second]\nBoth done."
+	if output != expectedOutput {
+		t.Errorf("expected output %q, got %q", expectedOutput, output)
 	}
-	if !strings.Contains(output, "[Result: second]") {
-		t.Errorf("missing second result in output: %s", output)
+
+	// Verify session structure: user + assistant(2 tool_calls) + tool_result(echo) + tool_result(echo) + assistant(final) = 5
+	if len(sess.Messages) != 5 {
+		t.Fatalf("expected 5 messages, got %d", len(sess.Messages))
 	}
-	if !strings.Contains(output, "Both done.") {
-		t.Errorf("missing final answer: %s", output)
+
+	// Message 0: user
+	if sess.Messages[0].Role != session.RoleUser || sess.Messages[0].Content != "Echo twice" {
+		t.Errorf("message[0] mismatch: %+v", sess.Messages[0])
+	}
+
+	// Message 1: assistant with 2 tool calls
+	if sess.Messages[1].Role != session.RoleAssistant {
+		t.Errorf("message[1] expected role assistant, got %s", sess.Messages[1].Role)
+	}
+	if len(sess.Messages[1].ToolCalls) != 2 {
+		t.Fatalf("message[1] expected 2 tool calls, got %d", len(sess.Messages[1].ToolCalls))
+	}
+	if sess.Messages[1].ToolCalls[0].ID != "call_a" {
+		t.Errorf("message[1] expected first tool call ID 'call_a', got %q", sess.Messages[1].ToolCalls[0].ID)
+	}
+	if sess.Messages[1].ToolCalls[1].ID != "call_b" {
+		t.Errorf("message[1] expected second tool call ID 'call_b', got %q", sess.Messages[1].ToolCalls[1].ID)
+	}
+
+	// Messages 2,3: tool results
+	if sess.Messages[2].Role != session.RoleTool || sess.Messages[2].Content != "first" {
+		t.Errorf("message[2] mismatch: %+v", sess.Messages[2])
+	}
+	if sess.Messages[2].ToolCallID != "call_a" {
+		t.Errorf("message[2] expected ToolCallID 'call_a', got %q", sess.Messages[2].ToolCallID)
+	}
+	if sess.Messages[3].Role != session.RoleTool || sess.Messages[3].Content != "second" {
+		t.Errorf("message[3] mismatch: %+v", sess.Messages[3])
+	}
+	if sess.Messages[3].ToolCallID != "call_b" {
+		t.Errorf("message[3] expected ToolCallID 'call_b', got %q", sess.Messages[3].ToolCallID)
+	}
+
+	// Message 4: final assistant
+	if sess.Messages[4].Role != session.RoleAssistant {
+		t.Errorf("message[4] expected role assistant, got %s", sess.Messages[4].Role)
+	}
+	if sess.Messages[4].Content != "Both done." {
+		t.Errorf("message[4] expected content 'Both done.', got %q", sess.Messages[4].Content)
 	}
 }
 
@@ -731,6 +937,23 @@ func TestProcessEmptyContentResponse(t *testing.T) {
 	if output != "" {
 		t.Errorf("expected empty output, got %q", output)
 	}
+
+	// Verify session structure: user + assistant (empty content, nil ToolCalls) = 2
+	if len(sess.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(sess.Messages))
+	}
+	if sess.Messages[0].Role != session.RoleUser || sess.Messages[0].Content != "Silent" {
+		t.Errorf("message[0] mismatch: %+v", sess.Messages[0])
+	}
+	if sess.Messages[1].Role != session.RoleAssistant {
+		t.Errorf("message[1] expected role assistant, got %s", sess.Messages[1].Role)
+	}
+	if sess.Messages[1].Content != "" {
+		t.Errorf("message[1] expected empty content, got %q", sess.Messages[1].Content)
+	}
+	if sess.Messages[1].ToolCalls != nil {
+		t.Errorf("message[1] expected nil ToolCalls, got %v", sess.Messages[1].ToolCalls)
+	}
 }
 
 func TestProcessWithImageAttachment(t *testing.T) {
@@ -753,8 +976,9 @@ func TestProcessWithImageAttachment(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	if !strings.Contains(output, "I see a photo of a cat.") {
-		t.Errorf("expected output to contain answer, got: %s", output)
+	// Verify exact output
+	if output != "I see a photo of a cat." {
+		t.Errorf("expected output 'I see a photo of a cat.', got %q", output)
 	}
 
 	// User message should have the attachment
@@ -879,12 +1103,28 @@ func TestProcessReasoningOutputFormat(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// Reasoning prefix format: [Reasoning: ...]\n
-	if !strings.HasPrefix(output, "[Reasoning: Step 1: think. Step 2: conclude.]\n") {
-		t.Errorf("expected reasoning prefix format, got: %q", output)
+	// Verify exact output structure: reasoning prefix + content
+	expectedOutput := "[Reasoning: Step 1: think. Step 2: conclude.]\nFinal answer."
+	if output != expectedOutput {
+		t.Errorf("expected output %q, got %q", expectedOutput, output)
 	}
-	if !strings.HasSuffix(output, "Final answer.") {
-		t.Errorf("expected content at end, got: %q", output)
+
+	// Verify session state: assistant message has reasoning content
+	if len(sess.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(sess.Messages))
+	}
+	assistant := sess.Messages[1]
+	if assistant.Role != session.RoleAssistant {
+		t.Errorf("expected role assistant, got %s", assistant.Role)
+	}
+	if assistant.Content != "Final answer." {
+		t.Errorf("expected content 'Final answer.', got %q", assistant.Content)
+	}
+	if assistant.ReasoningContent != "Step 1: think. Step 2: conclude." {
+		t.Errorf("expected reasoning 'Step 1: think. Step 2: conclude.', got %q", assistant.ReasoningContent)
+	}
+	if assistant.ToolCalls != nil {
+		t.Errorf("expected nil ToolCalls, got %v", assistant.ToolCalls)
 	}
 }
 
@@ -947,21 +1187,10 @@ func TestProcessMultipleDifferentToolCalls(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// Both tool calls should appear in output
-	if !strings.Contains(output, "[Tool Call: echo]") {
-		t.Errorf("missing echo tool call in output: %s", output)
-	}
-	if !strings.Contains(output, "[Tool Call: upper]") {
-		t.Errorf("missing upper tool call in output: %s", output)
-	}
-	if !strings.Contains(output, "[Result: hello]") {
-		t.Errorf("missing echo result in output: %s", output)
-	}
-	if !strings.Contains(output, "[Result: WORLD]") {
-		t.Errorf("missing upper result in output: %s", output)
-	}
-	if !strings.Contains(output, "Echoed: hello, Uppercased: WORLD") {
-		t.Errorf("missing final answer in output: %s", output)
+	// Verify exact output structure with both tool calls, results, and final answer
+	expectedOutput := "\n[Tool Call: echo]\n[Result: hello]\n\n[Tool Call: upper]\n[Result: WORLD]\nEchoed: hello, Uppercased: WORLD"
+	if output != expectedOutput {
+		t.Errorf("expected output %q, got %q", expectedOutput, output)
 	}
 
 	// Session should have: user + assistant(tool_calls) + tool_result(echo) + tool_result(upper) + assistant(final) = 5
@@ -1022,30 +1251,53 @@ func TestProcessImageAttachmentWithToolCall(t *testing.T) {
 		t.Fatalf("Process failed: %v", err)
 	}
 
-	// User message should have the attachment
-	if len(sess.Messages[0].Attachments) != 1 {
-		t.Fatalf("expected 1 attachment on user message, got %d", len(sess.Messages[0].Attachments))
-	}
-
-	// Verify the LLM received a multimodal message (content is JSON array)
-	lastMsgs := mc.LastMessages()
-	var parts []map[string]interface{}
-	if err := json.Unmarshal(lastMsgs[1].Content, &parts); err != nil {
-		t.Fatalf("expected multimodal content, got: %s", string(lastMsgs[1].Content))
-	}
-	if len(parts) != 2 {
-		t.Errorf("expected 2 content parts (text + image), got %d", len(parts))
-	}
-	if parts[0]["type"] != "text" || parts[0]["text"] != "what is this?" {
-		t.Errorf("expected text part, got %v", parts[0])
-	}
-	if parts[1]["type"] != "image_url" {
-		t.Errorf("expected image_url part, got %v", parts[1])
-	}
-
 	// Session should have: user(attached) + assistant(tool_call) + tool + assistant(final) = 4
 	if len(sess.Messages) != 4 {
-		t.Errorf("expected 4 messages, got %d", len(sess.Messages))
+		t.Fatalf("expected 4 messages, got %d", len(sess.Messages))
+	}
+
+	// Message 0: user with attachment
+	if sess.Messages[0].Role != session.RoleUser {
+		t.Errorf("message[0] expected role user, got %s", sess.Messages[0].Role)
+	}
+	if sess.Messages[0].Content != "what is this?" {
+		t.Errorf("message[0] expected content 'what is this?', got %q", sess.Messages[0].Content)
+	}
+	if len(sess.Messages[0].Attachments) != 1 {
+		t.Errorf("message[0] expected 1 attachment, got %d", len(sess.Messages[0].Attachments))
+	}
+
+	// Message 1: assistant with tool call
+	if sess.Messages[1].Role != session.RoleAssistant {
+		t.Errorf("message[1] expected role assistant, got %s", sess.Messages[1].Role)
+	}
+	if len(sess.Messages[1].ToolCalls) != 1 {
+		t.Fatalf("message[1] expected 1 tool call, got %d", len(sess.Messages[1].ToolCalls))
+	}
+	if sess.Messages[1].ToolCalls[0].ID != "call_1" {
+		t.Errorf("message[1] expected tool call ID 'call_1', got %q", sess.Messages[1].ToolCalls[0].ID)
+	}
+	if sess.Messages[1].ToolCalls[0].Function.Name != "echo" {
+		t.Errorf("message[1] expected tool name 'echo', got %q", sess.Messages[1].ToolCalls[0].Function.Name)
+	}
+
+	// Message 2: tool result
+	if sess.Messages[2].Role != session.RoleTool {
+		t.Errorf("message[2] expected role tool, got %s", sess.Messages[2].Role)
+	}
+	if sess.Messages[2].Content != "described" {
+		t.Errorf("message[2] expected content 'described', got %q", sess.Messages[2].Content)
+	}
+	if sess.Messages[2].ToolCallID != "call_1" {
+		t.Errorf("message[2] expected ToolCallID 'call_1', got %q", sess.Messages[2].ToolCallID)
+	}
+
+	// Message 3: final assistant
+	if sess.Messages[3].Role != session.RoleAssistant {
+		t.Errorf("message[3] expected role assistant, got %s", sess.Messages[3].Role)
+	}
+	if sess.Messages[3].Content != "I see a cat and described it." {
+		t.Errorf("message[3] expected content 'I see a cat and described it.', got %q", sess.Messages[3].Content)
 	}
 }
 
@@ -1092,12 +1344,10 @@ func TestProcessReasoningPreservedAfterToolLoop(t *testing.T) {
 		t.Errorf("expected content 'Done.', got %q", finalAssistant.Content)
 	}
 
-	// Output should contain both reasoning blocks
-	if !strings.Contains(output, "[Reasoning: I should echo the input first.]") {
-		t.Errorf("expected first reasoning in output: %s", output)
-	}
-	if !strings.Contains(output, "[Reasoning: The echo was successful.]") {
-		t.Errorf("expected second reasoning in output: %s", output)
+	// Verify exact output structure with reasoning blocks, tool call, result, and final answer
+	expectedOutput := "[Reasoning: I should echo the input first.]\n\n[Tool Call: echo]\n[Result: hello]\n[Reasoning: The echo was successful.]\nDone."
+	if output != expectedOutput {
+		t.Errorf("expected output %q, got %q", expectedOutput, output)
 	}
 }
 

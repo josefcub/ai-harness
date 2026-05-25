@@ -4,12 +4,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ---
 
-## agent/agent_test.go
-
-- [ ] `agent_test.go` — existing tests use surface assertions (`err == nil`, output string prefix checks) rather than deep data-structure verification. All tests should verify returned fields, message roles, tool call IDs, and session state.
-
----
-
 ## worker/worker.go
 
 - [ ] `worker.go:109-172` `processMessage()` — per-message processing with session save and callback dispatch.
