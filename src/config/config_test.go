@@ -107,6 +107,9 @@ log_channel_events = true
 	if cfg.Paths.StateDir != "./state/" {
 		t.Errorf("state_dir = %q, want ./state/", cfg.Paths.StateDir)
 	}
+	if cfg.Paths.ChannelLogDir != "" {
+		t.Errorf("channel_log_dir should default to empty, got %q", cfg.Paths.ChannelLogDir)
+	}
 
 	// Validate logging
 	if cfg.Logging.Level != "debug" {
@@ -120,6 +123,23 @@ log_channel_events = true
 	}
 	if !cfg.Logging.LogChannelEvents {
 		t.Error("log_channel_events should be true")
+	}
+
+	// Validate bash
+	if !cfg.Bash.Enabled {
+		t.Error("bash enabled should be true")
+	}
+	if cfg.Bash.Timeout != 60*time.Second {
+		t.Errorf("bash timeout should default to 60s, got %v", cfg.Bash.Timeout)
+	}
+	if cfg.Bash.MaxOutput != 30720 {
+		t.Errorf("bash max_output should default to 30720, got %d", cfg.Bash.MaxOutput)
+	}
+	if len(cfg.Bash.Banned) == 0 {
+		t.Error("bash banned should not be empty")
+	}
+	if cfg.Bash.Banned[0] != "curl" {
+		t.Errorf("bash banned[0] = %q, want curl", cfg.Bash.Banned[0])
 	}
 
 	// Check new summarization defaults
@@ -186,6 +206,30 @@ model = "test-model"
 	}
 	if !cfg.Logging.LogChannelEvents {
 		t.Error("log_channel_events should default to true")
+	}
+	if cfg.Bash.Enabled != true {
+		t.Errorf("bash enabled should default to true, got %v", cfg.Bash.Enabled)
+	}
+	if cfg.Bash.Timeout != 60*time.Second {
+		t.Errorf("bash timeout should default to 60s, got %v", cfg.Bash.Timeout)
+	}
+	if cfg.Bash.MaxOutput != 30720 {
+		t.Errorf("bash max_output should default to 30720, got %d", cfg.Bash.MaxOutput)
+	}
+	if len(cfg.Bash.Banned) == 0 {
+		t.Error("bash banned should not be empty by default")
+	}
+	if cfg.Bash.Banned[0] != "curl" {
+		t.Errorf("bash banned[0] = %q, want curl", cfg.Bash.Banned[0])
+	}
+	if cfg.Paths.ChannelLogDir != "" {
+		t.Errorf("channel_log_dir should default to empty, got %q", cfg.Paths.ChannelLogDir)
+	}
+	if cfg.LLM.SummarizeThreshold != 0.70 {
+		t.Errorf("summarize_threshold should default to 0.70, got %f", cfg.LLM.SummarizeThreshold)
+	}
+	if cfg.LLM.SummarizeKeepRecent != 10 {
+		t.Errorf("summarize_keep_recent should default to 10, got %d", cfg.LLM.SummarizeKeepRecent)
 	}
 }
 
@@ -431,6 +475,81 @@ func TestBoolDefault(t *testing.T) {
 	}
 }
 
+func TestStrListDefaultEmptyDefault(t *testing.T) {
+	if strListDefault(nil, "s", "k", "") != nil {
+		t.Error("empty default should produce nil slice")
+	}
+}
+
+func TestStrListDefaultSingleItem(t *testing.T) {
+	data := map[string]map[string]string{"s": {"k": "single"}}
+	result := strListDefault(data, "s", "k", "default")
+	if len(result) != 1 || result[0] != "single" {
+		t.Errorf("expected [single], got %v", result)
+	}
+}
+
+func TestStrListDefaultWhitespaceTrimmed(t *testing.T) {
+	data := map[string]map[string]string{"s": {"k": "a, b ,c"}}
+	result := strListDefault(data, "s", "k", "default")
+	if len(result) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(result))
+	}
+	if result[0] != "a" || result[1] != "b" || result[2] != "c" {
+		t.Errorf("expected [a b c], got %v", result)
+	}
+}
+
+func TestStrListDefaultLowercased(t *testing.T) {
+	data := map[string]map[string]string{"s": {"k": "Curl,WGET,SSH"}}
+	result := strListDefault(data, "s", "k", "default")
+	if len(result) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(result))
+	}
+	if result[0] != "curl" || result[1] != "wget" || result[2] != "ssh" {
+		t.Errorf("expected lowercased, got %v", result)
+	}
+}
+
+func TestStrListDefaultEmptyEntriesFiltered(t *testing.T) {
+	data := map[string]map[string]string{"s": {"k": "a,,b,"}}
+	result := strListDefault(data, "s", "k", "default")
+	if len(result) != 2 {
+		t.Fatalf("expected 2 items (empty entries filtered), got %d: %v", len(result), result)
+	}
+	if result[0] != "a" || result[1] != "b" {
+		t.Errorf("expected [a b], got %v", result)
+	}
+}
+
+func TestStrListDefaultFallbackSplit(t *testing.T) {
+	data := map[string]map[string]string{"s": {}}
+	result := strListDefault(data, "s", "missing", "curl,wget,ssh")
+	if len(result) != 3 {
+		t.Fatalf("expected 3 from fallback split, got %d", len(result))
+	}
+	if result[0] != "curl" || result[1] != "wget" || result[2] != "ssh" {
+		t.Errorf("expected [curl wget ssh], got %v", result)
+	}
+}
+
+func TestStrListDefaultMissingSectionFallback(t *testing.T) {
+	result := strListDefault(nil, "missing", "key", "a,b")
+	if len(result) != 2 || result[0] != "a" || result[1] != "b" {
+		t.Errorf("expected fallback split [a b], got %v", result)
+	}
+}
+
+func TestDefaultBannedCommandsNotWrappedInString(t *testing.T) {
+	if len(DefaultBannedCommands) == 0 {
+		t.Fatal("DefaultBannedCommands should not be empty")
+	}
+	// Verify it starts and ends with valid command chars, not quotes
+	if DefaultBannedCommands[0] == '"' || DefaultBannedCommands[len(DefaultBannedCommands)-1] == '"' {
+		t.Error("DefaultBannedCommands should not contain quote characters")
+	}
+}
+
 func TestFloatDefault(t *testing.T) {
 	data := map[string]map[string]string{
 		"section": {"a": "0.5", "b": "1.25", "c": "not-a-float"},
@@ -558,5 +677,686 @@ max_body_bytes = -1
 	}
 	if !strings.Contains(err.Error(), "max_body_bytes") {
 		t.Errorf("expected max_body_bytes in error, got: %v", err)
+	}
+}
+
+// --- validateLLM tests ---
+
+func TestValidateLLM(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     func() *Config
+		wantErr []string
+	}{
+		{
+			name: "all valid",
+			cfg: func() *Config {
+				return &Config{
+					LLM: LLMConfig{
+						Endpoint:            "http://localhost:8080/v1",
+						Model:               "test-model",
+						ContextTokens:       8192,
+						MaxTokens:           4096,
+						Timeout:             120 * time.Second,
+						MaxToolIterations:   20,
+						SummarizeThreshold:  0.7,
+						SummarizeKeepRecent: 10,
+					},
+					Server:  ServerConfig{Port: 8080, MaxBodyBytes: 1048576},
+					Queue:   QueueConfig{MaxDepth: 64},
+					Logging: LoggingConfig{Level: "info"},
+					Bash:    BashConfig{Timeout: 60 * time.Second, MaxOutput: 30720},
+				}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "missing endpoint",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.Endpoint = ""
+				return c
+			},
+			wantErr: []string{"llm.endpoint"},
+		},
+		{
+			name: "missing model",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.Model = ""
+				return c
+			},
+			wantErr: []string{"llm.model"},
+		},
+		{
+			name: "context tokens zero",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.ContextTokens = 0
+				return c
+			},
+			wantErr: []string{"context_tokens"},
+		},
+		{
+			name: "context tokens negative",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.ContextTokens = -1
+				return c
+			},
+			wantErr: []string{"context_tokens"},
+		},
+		{
+			name: "max tokens zero",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.MaxTokens = 0
+				return c
+			},
+			wantErr: []string{"max_tokens"},
+		},
+		{
+			name: "timeout zero",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.Timeout = 0
+				return c
+			},
+			wantErr: []string{"timeout"},
+		},
+		{
+			name: "max tool iterations zero",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.MaxToolIterations = 0
+				return c
+			},
+			wantErr: []string{"max_tool_iterations"},
+		},
+		{
+			name: "summarize threshold zero",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.SummarizeThreshold = 0
+				return c
+			},
+			wantErr: []string{"summarize_threshold"},
+		},
+		{
+			name: "summarize threshold negative",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.SummarizeThreshold = -0.1
+				return c
+			},
+			wantErr: []string{"summarize_threshold"},
+		},
+		{
+			name: "summarize threshold over one",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.SummarizeThreshold = 1.5
+				return c
+			},
+			wantErr: []string{"summarize_threshold"},
+		},
+		{
+			name: "summarize keep recent negative",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.SummarizeKeepRecent = -1
+				return c
+			},
+			wantErr: []string{"summarize_keep_recent"},
+		},
+		{
+			name: "summarize keep recent zero is valid",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.SummarizeKeepRecent = 0
+				return c
+			},
+			wantErr: nil,
+		},
+		{
+			name: "summarize threshold exactly 1 is valid",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.SummarizeThreshold = 1
+				return c
+			},
+			wantErr: nil,
+		},
+		{
+			name: "multiple errors",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.LLM.Endpoint = ""
+				c.LLM.Model = ""
+				c.LLM.ContextTokens = -1
+				c.LLM.MaxTokens = 0
+				c.LLM.Timeout = 0
+				c.LLM.MaxToolIterations = -1
+				c.LLM.SummarizeThreshold = 2.0
+				c.LLM.SummarizeKeepRecent = -5
+				return c
+			},
+			wantErr: []string{"endpoint", "model", "context_tokens", "max_tokens", "timeout", "max_tool_iterations", "summarize_threshold", "summarize_keep_recent"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var errs []string
+			tc.cfg().validateLLM(&errs)
+			if tc.wantErr == nil {
+				if len(errs) > 0 {
+					t.Fatalf("expected no errors, got: %v", errs)
+				}
+				return
+			}
+			if len(errs) != len(tc.wantErr) {
+				t.Fatalf("expected %d errors, got %d: %v", len(tc.wantErr), len(errs), errs)
+			}
+			for _, want := range tc.wantErr {
+				found := false
+				for _, e := range errs {
+					if strings.Contains(e, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error containing %q, got: %v", want, errs)
+				}
+			}
+		})
+	}
+}
+
+// --- validateServer tests ---
+
+func TestValidateServer(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     func() *Config
+		wantErr []string
+	}{
+		{
+			name: "all valid",
+			cfg: func() *Config {
+				return &Config{
+					Server: ServerConfig{Port: 8080, MaxBodyBytes: 1048576},
+				}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "port zero",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.Server.Port = 0
+				return c
+			},
+			wantErr: []string{"port"},
+		},
+		{
+			name: "port negative",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.Server.Port = -1
+				return c
+			},
+			wantErr: []string{"port"},
+		},
+		{
+			name: "port max",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.Server.Port = 65535
+				return c
+			},
+			wantErr: nil,
+		},
+		{
+			name: "port over max",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.Server.Port = 65536
+				return c
+			},
+			wantErr: []string{"port"},
+		},
+		{
+			name: "port well known",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.Server.Port = 80
+				return c
+			},
+			wantErr: nil,
+		},
+		{
+			name: "max body bytes zero",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.Server.MaxBodyBytes = 0
+				return c
+			},
+			wantErr: []string{"max_body_bytes"},
+		},
+		{
+			name: "max body bytes negative",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.Server.MaxBodyBytes = -1
+				return c
+			},
+			wantErr: []string{"max_body_bytes"},
+		},
+		{
+			name: "max body bytes one is valid",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.Server.MaxBodyBytes = 1
+				return c
+			},
+			wantErr: nil,
+		},
+		{
+			name: "multiple errors",
+			cfg: func() *Config {
+				c := validBaseConfig()
+				c.Server.Port = 0
+				c.Server.MaxBodyBytes = -1
+				return c
+			},
+			wantErr: []string{"port", "max_body_bytes"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var errs []string
+			tc.cfg().validateServer(&errs)
+			if tc.wantErr == nil {
+				if len(errs) > 0 {
+					t.Fatalf("expected no errors, got: %v", errs)
+				}
+				return
+			}
+			if len(errs) != len(tc.wantErr) {
+				t.Fatalf("expected %d errors, got %d: %v", len(tc.wantErr), len(errs), errs)
+			}
+			for _, want := range tc.wantErr {
+				found := false
+				for _, e := range errs {
+					if strings.Contains(e, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error containing %q, got: %v", want, errs)
+				}
+			}
+		})
+	}
+}
+
+// --- validateQueue tests ---
+
+func TestValidateQueue(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     func() *Config
+		wantErr []string
+	}{
+		{
+			name: "all valid",
+			cfg: func() *Config {
+				return &Config{Queue: QueueConfig{MaxDepth: 64}}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "max depth zero",
+			cfg: func() *Config {
+				return &Config{Queue: QueueConfig{MaxDepth: 0}}
+			},
+			wantErr: []string{"max_depth"},
+		},
+		{
+			name: "max depth negative",
+			cfg: func() *Config {
+				return &Config{Queue: QueueConfig{MaxDepth: -1}}
+			},
+			wantErr: []string{"max_depth"},
+		},
+		{
+			name: "max depth one",
+			cfg: func() *Config {
+				return &Config{Queue: QueueConfig{MaxDepth: 1}}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "max depth large",
+			cfg: func() *Config {
+				return &Config{Queue: QueueConfig{MaxDepth: 10000}}
+			},
+			wantErr: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var errs []string
+			tc.cfg().validateQueue(&errs)
+			if tc.wantErr == nil {
+				if len(errs) > 0 {
+					t.Fatalf("expected no errors, got: %v", errs)
+				}
+				return
+			}
+			if len(errs) != len(tc.wantErr) {
+				t.Fatalf("expected %d errors, got %d: %v", len(tc.wantErr), len(errs), errs)
+			}
+			for _, want := range tc.wantErr {
+				found := false
+				for _, e := range errs {
+					if strings.Contains(e, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error containing %q, got: %v", want, errs)
+				}
+			}
+		})
+	}
+}
+
+// --- validateLogging tests ---
+
+func TestValidateLogging(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     func() *Config
+		wantErr []string
+	}{
+		{
+			name: "debug",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: "debug"}}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "info",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: "info"}}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "warn",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: "warn"}}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "error",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: "error"}}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "uppercase DEBUG",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: "DEBUG"}}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "mixed case Info",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: "Info"}}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "uppercase WARN",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: "WARN"}}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "uppercase ERROR",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: "ERROR"}}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "invalid level",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: "invalid"}}
+			},
+			wantErr: []string{"logging.level"},
+		},
+		{
+			name: "empty level",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: ""}}
+			},
+			wantErr: []string{"logging.level"},
+		},
+		{
+			name: "random string level",
+			cfg: func() *Config {
+				return &Config{Logging: LoggingConfig{Level: "foobar"}}
+			},
+			wantErr: []string{"logging.level"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var errs []string
+			tc.cfg().validateLogging(&errs)
+			if tc.wantErr == nil {
+				if len(errs) > 0 {
+					t.Fatalf("expected no errors, got: %v", errs)
+				}
+				return
+			}
+			if len(errs) != len(tc.wantErr) {
+				t.Fatalf("expected %d errors, got %d: %v", len(tc.wantErr), len(errs), errs)
+			}
+			for _, want := range tc.wantErr {
+				found := false
+				for _, e := range errs {
+					if strings.Contains(e, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error containing %q, got: %v", want, errs)
+				}
+			}
+		})
+	}
+}
+
+// --- validateBash tests ---
+
+func TestValidateBash(t *testing.T) {
+	tests := []struct {
+		name    string
+		cfg     func() *Config
+		wantErr []string
+	}{
+		{
+			name: "all valid",
+			cfg: func() *Config {
+				return &Config{
+					Bash: BashConfig{
+						Timeout:   60 * time.Second,
+						MaxOutput: 30720,
+					},
+				}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "timeout zero",
+			cfg: func() *Config {
+				return &Config{
+					Bash: BashConfig{
+						Timeout:   0,
+						MaxOutput: 30720,
+					},
+				}
+			},
+			wantErr: []string{"bash.timeout"},
+		},
+		{
+			name: "timeout negative",
+			cfg: func() *Config {
+				return &Config{
+					Bash: BashConfig{
+						Timeout:   -10 * time.Second,
+						MaxOutput: 30720,
+					},
+				}
+			},
+			wantErr: []string{"bash.timeout"},
+		},
+		{
+			name: "timeout one second",
+			cfg: func() *Config {
+				return &Config{
+					Bash: BashConfig{
+						Timeout:   1 * time.Second,
+						MaxOutput: 30720,
+					},
+				}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "max output zero",
+			cfg: func() *Config {
+				return &Config{
+					Bash: BashConfig{
+						Timeout:   60 * time.Second,
+						MaxOutput: 0,
+					},
+				}
+			},
+			wantErr: []string{"max_output"},
+		},
+		{
+			name: "max output negative",
+			cfg: func() *Config {
+				return &Config{
+					Bash: BashConfig{
+						Timeout:   60 * time.Second,
+						MaxOutput: -1,
+					},
+				}
+			},
+			wantErr: []string{"max_output"},
+		},
+		{
+			name: "max output one",
+			cfg: func() *Config {
+				return &Config{
+					Bash: BashConfig{
+						Timeout:   60 * time.Second,
+						MaxOutput: 1,
+					},
+				}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "max output large",
+			cfg: func() *Config {
+				return &Config{
+					Bash: BashConfig{
+						Timeout:   60 * time.Second,
+						MaxOutput: 1048576,
+					},
+				}
+			},
+			wantErr: nil,
+		},
+		{
+			name: "multiple errors",
+			cfg: func() *Config {
+				return &Config{
+					Bash: BashConfig{
+						Timeout:   0,
+						MaxOutput: -1,
+					},
+				}
+			},
+			wantErr: []string{"bash.timeout", "max_output"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var errs []string
+			tc.cfg().validateBash(&errs)
+			if tc.wantErr == nil {
+				if len(errs) > 0 {
+					t.Fatalf("expected no errors, got: %v", errs)
+				}
+				return
+			}
+			if len(errs) != len(tc.wantErr) {
+				t.Fatalf("expected %d errors, got %d: %v", len(tc.wantErr), len(errs), errs)
+			}
+			for _, want := range tc.wantErr {
+				found := false
+				for _, e := range errs {
+					if strings.Contains(e, want) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error containing %q, got: %v", want, errs)
+				}
+			}
+		})
+	}
+}
+
+// validBaseConfig returns a Config that passes all validation checks.
+func validBaseConfig() *Config {
+	return &Config{
+		LLM: LLMConfig{
+			Endpoint:            "http://localhost:8080/v1",
+			Model:               "test-model",
+			ContextTokens:       8192,
+			MaxTokens:           4096,
+			Timeout:             120 * time.Second,
+			MaxToolIterations:   20,
+			SummarizeThreshold:  0.7,
+			SummarizeKeepRecent: 10,
+		},
+		Server:  ServerConfig{Port: 8080, MaxBodyBytes: 1048576},
+		Queue:   QueueConfig{MaxDepth: 64},
+		Logging: LoggingConfig{Level: "info"},
+		Bash:    BashConfig{Timeout: 60 * time.Second, MaxOutput: 30720},
 	}
 }

@@ -55,6 +55,9 @@ type LoggingConfig struct {
 	LogChannelEvents  bool
 }
 
+// DefaultBannedCommands is the default list of banned bash commands.
+const DefaultBannedCommands = "curl,wget,ssh,scp,ssh-keygen,nc,telnet,sudo,su,doas,rm,dd,chmod,chown,apt,apt-get,apt-cache,yum,dnf,brew,pip,pip3,npm,yarn,npx,pkg,pkg_add,apk,aptitude,makepkg,paru,pacman,zypper,rpm,emerge,service,systemctl,systemd,firewall-ctd,iptables,ufw,netstat,ifconfig,ip,route,crontab,at,batch,chkconfig,fdisk,mkfs,mount,umount,parted,scp,rsync"
+
 type BashConfig struct {
 	Enabled   bool
 	Timeout   time.Duration
@@ -109,7 +112,7 @@ func Load(path string) (*Config, error) {
 	cfg.Bash.Enabled = boolDefault(data, "tools.bash", "enabled", true)
 	cfg.Bash.Timeout = time.Duration(intDefault(data, "tools.bash", "timeout", 60)) * time.Second
 	cfg.Bash.MaxOutput = intDefault(data, "tools.bash", "max_output", 30720)
-	cfg.Bash.Banned = strListDefault(data, "tools.bash", "banned", "curl,wget,ssh,scp,ssh-keygen,nc,telnet,sudo,su,doas,rm,dd,chmod,chown,apt,apt-get,apt-cache,yum,dnf,brew,pip,pip3,npm,yarn,npx,pkg,pkg_add,apk,aptitude,makepkg,paru,pacman,zypper,rpm,emerge,service,systemctl,systemd,firewall-ctd,iptables,ufw,netstat,ifconfig,ip,route,crontab,at,batch,chkconfig,fdisk,mkfs,mount,umount,parted,scp,rsync")
+	cfg.Bash.Banned = strListDefault(data, "tools.bash", "banned", DefaultBannedCommands)
 
 	return cfg, nil
 }
@@ -118,60 +121,76 @@ func Load(path string) (*Config, error) {
 func (c *Config) Validate() error {
 	var errors []string
 
-	if c.LLM.Endpoint == "" {
-		errors = append(errors, "llm.endpoint is required (fatal)")
-	}
-	if c.LLM.Model == "" {
-		errors = append(errors, "llm.model is required (fatal)")
-	}
-	if c.LLM.ContextTokens <= 0 {
-		errors = append(errors, "llm.context_tokens must be positive")
-	}
-	if c.LLM.MaxTokens <= 0 {
-		errors = append(errors, "llm.max_tokens must be positive")
-	}
-	if c.LLM.Timeout <= 0 {
-		errors = append(errors, "llm.timeout must be positive")
-	}
-	if c.LLM.MaxToolIterations <= 0 {
-		errors = append(errors, "llm.max_tool_iterations must be positive")
-	}
-	if c.LLM.SummarizeThreshold <= 0 || c.LLM.SummarizeThreshold > 1 {
-		errors = append(errors, "llm.summarize_threshold must be between 0 and 1")
-	}
-	if c.LLM.SummarizeKeepRecent < 0 {
-		errors = append(errors, "llm.summarize_keep_recent must be non-negative")
-	}
-	if c.Queue.MaxDepth <= 0 {
-		errors = append(errors, "queue.max_depth must be positive")
-	}
-	if c.Server.Port <= 0 || c.Server.Port > 65535 {
-		errors = append(errors, "server.port must be between 1 and 65535")
-	}
-	if c.Server.MaxBodyBytes <= 0 {
-		errors = append(errors, "server.max_body_bytes must be positive")
-	}
-
-	// Validate log level
-	level := strings.ToLower(c.Logging.Level)
-	switch level {
-	case "debug", "info", "warn", "error":
-	default:
-		errors = append(errors, fmt.Sprintf("logging.level %q is invalid (must be debug, info, warn, or error)", c.Logging.Level))
-	}
-
-	// Validate bash config
-	if c.Bash.Timeout <= 0 {
-		errors = append(errors, "tools.bash.timeout must be positive")
-	}
-	if c.Bash.MaxOutput <= 0 {
-		errors = append(errors, "tools.bash.max_output must be positive")
-	}
+	c.validateLLM(&errors)
+	c.validateServer(&errors)
+	c.validateQueue(&errors)
+	c.validateLogging(&errors)
+	c.validateBash(&errors)
 
 	if len(errors) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errors, "\n  - "))
 	}
 	return nil
+}
+
+func (c *Config) validateLLM(errors *[]string) {
+	if c.LLM.Endpoint == "" {
+		*errors = append(*errors, "llm.endpoint is required (fatal)")
+	}
+	if c.LLM.Model == "" {
+		*errors = append(*errors, "llm.model is required (fatal)")
+	}
+	if c.LLM.ContextTokens <= 0 {
+		*errors = append(*errors, "llm.context_tokens must be positive")
+	}
+	if c.LLM.MaxTokens <= 0 {
+		*errors = append(*errors, "llm.max_tokens must be positive")
+	}
+	if c.LLM.Timeout <= 0 {
+		*errors = append(*errors, "llm.timeout must be positive")
+	}
+	if c.LLM.MaxToolIterations <= 0 {
+		*errors = append(*errors, "llm.max_tool_iterations must be positive")
+	}
+	if c.LLM.SummarizeThreshold <= 0 || c.LLM.SummarizeThreshold > 1 {
+		*errors = append(*errors, "llm.summarize_threshold must be between 0 and 1")
+	}
+	if c.LLM.SummarizeKeepRecent < 0 {
+		*errors = append(*errors, "llm.summarize_keep_recent must be non-negative")
+	}
+}
+
+func (c *Config) validateServer(errors *[]string) {
+	if c.Server.Port <= 0 || c.Server.Port > 65535 {
+		*errors = append(*errors, "server.port must be between 1 and 65535")
+	}
+	if c.Server.MaxBodyBytes <= 0 {
+		*errors = append(*errors, "server.max_body_bytes must be positive")
+	}
+}
+
+func (c *Config) validateQueue(errors *[]string) {
+	if c.Queue.MaxDepth <= 0 {
+		*errors = append(*errors, "queue.max_depth must be positive")
+	}
+}
+
+func (c *Config) validateLogging(errors *[]string) {
+	level := strings.ToLower(c.Logging.Level)
+	switch level {
+	case "debug", "info", "warn", "error":
+	default:
+		*errors = append(*errors, fmt.Sprintf("logging.level %q is invalid (must be debug, info, warn, or error)", c.Logging.Level))
+	}
+}
+
+func (c *Config) validateBash(errors *[]string) {
+	if c.Bash.Timeout <= 0 {
+		*errors = append(*errors, "tools.bash.timeout must be positive")
+	}
+	if c.Bash.MaxOutput <= 0 {
+		*errors = append(*errors, "tools.bash.max_output must be positive")
+	}
 }
 
 // strDefault returns the value for section/key, or defaultValue if missing.

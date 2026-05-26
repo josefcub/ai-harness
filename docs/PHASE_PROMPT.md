@@ -5,12 +5,10 @@ In the file `docs/TODO.md` is a checklist of most of the issues with the current
 What I'd like to ask you to do, please, is:
 
 1) Starting at the top of the list, pick a top-level TODO item that hasn't been completed yet. 
-2) Work on this item.  
-     * Consider the principles in `Software Engineering at Google` and `The Pragmatic Programmer` that apply here, and make deliberate decisions based upon those texts.
-     * Consider also the design patterns by Sandi Metz and Martin Fowler, and make deliberate decisions that are aligned with them.
-3) Work *only* on this item, until it is complete.  Ensure that you've completed the sub-items associated this one, and written the tests to the appropriate standards in `docs/TESTS.md`.
-4) Edit the TODO.md to mark the item as complete, preserving its original description.
-5) Stop, and let me know what you've done, what's changed, and the challenges you faced.
+2) Work on this item. Consider the principles espoused by Sandi Metz and Martin Fowler, and the books `Software Engineering at Google` and `The Pragmatic Programmer` that apply here, and make deliberate decisions based upon those texts.
+1) Work *only* on this item, until it is complete.  Ensure that you've completed the sub-items associated this one, and written the tests to the appropriate standards in `docs/TESTS.md`.
+2) Edit TODO.md to mark the item as complete, preserving its original description.
+3) Stop, and let me know what you've done, what's changed, and the challenges you faced.
 
 Remember, you can ask me questions at any point if you need guidance.  
 

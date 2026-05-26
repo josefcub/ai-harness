@@ -126,6 +126,18 @@ That's not a constructor — it's a configuration object masquerading as a param
 
 Refactored entirely instead of doing the thing.  Ugh.
 
+---
+
+## config/config.go
+
+- [x] `config.go:112` `Load()` — Bash.Banned default is a 60+ token inline comma-separated list.
+  - Code quality issues:
+    - [x] Inline list should be extracted to a `var` or `const` for readability and independent **testability**
+
+- [x] `config.go:118-175` `Validate()` — 58 lines with 12+ individual `if` checks.
+  - Code quality issues:
+    - [x] Violates SRP — should split into `validateLLM()`, `validateServer()`, `validateQueue()`, `validateLogging()`, `validateBash()` sub-methods for testability and maintainability
+
 
 
 

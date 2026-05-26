@@ -6,13 +6,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ## config/config.go
 
-- [ ] `config.go:112` `Load()` — Bash.Banned default is a 60+ token inline comma-separated list.
-  - Code quality issues:
-    - [ ] Inline list should be extracted to a `var` or `const` for readability and independent testability
-
-- [ ] `config.go:118-175` `Validate()` — 58 lines with 12+ individual `if` checks.
-  - Code quality issues:
-    - [ ] Violates SRP — should split into `validateLLM()`, `validateServer()`, `validateQueue()`, `validateLogging()`, `validateBash()` sub-methods for testability and maintainability
 
 - [ ] `config.go:178-237` helper functions.
   - It contains the following behaviors, each one of which needs to be tested:

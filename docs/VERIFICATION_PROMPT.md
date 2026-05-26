@@ -10,11 +10,10 @@ If we find problems here, we will start a new session to remediate what you find
 
 I have the following questions about the tasks above:
 
-  * Are all the test functions actually functioning and not silently misconfigured?
-  * How does the main() execution test actually work?
+  * Are all the test functions actually behavioral in nature?
   
   Ongoing concerns:
 
-  * Were principles in `Software Engineering at Google` and `The Pragmatic Programmer` applied here?
-  * What would Sandi Metz and Martin Fowler think about the work as presented?
+  * Were principles in `Software Engineering at Google` and `The Pragmatic Programmer` applied to the task bove?
+  * What would Sandi Metz and Martin Fowler think about how the task was completed?
   
