@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -472,71 +473,6 @@ func TestBoolDefault(t *testing.T) {
 	}
 	if boolDefault(data, "section", "missing", false) {
 		t.Error("expected default for missing key")
-	}
-}
-
-func TestStrListDefaultEmptyDefault(t *testing.T) {
-	if strListDefault(nil, "s", "k", "") != nil {
-		t.Error("empty default should produce nil slice")
-	}
-}
-
-func TestStrListDefaultSingleItem(t *testing.T) {
-	data := map[string]map[string]string{"s": {"k": "single"}}
-	result := strListDefault(data, "s", "k", "default")
-	if len(result) != 1 || result[0] != "single" {
-		t.Errorf("expected [single], got %v", result)
-	}
-}
-
-func TestStrListDefaultWhitespaceTrimmed(t *testing.T) {
-	data := map[string]map[string]string{"s": {"k": "a, b ,c"}}
-	result := strListDefault(data, "s", "k", "default")
-	if len(result) != 3 {
-		t.Fatalf("expected 3 items, got %d", len(result))
-	}
-	if result[0] != "a" || result[1] != "b" || result[2] != "c" {
-		t.Errorf("expected [a b c], got %v", result)
-	}
-}
-
-func TestStrListDefaultLowercased(t *testing.T) {
-	data := map[string]map[string]string{"s": {"k": "Curl,WGET,SSH"}}
-	result := strListDefault(data, "s", "k", "default")
-	if len(result) != 3 {
-		t.Fatalf("expected 3 items, got %d", len(result))
-	}
-	if result[0] != "curl" || result[1] != "wget" || result[2] != "ssh" {
-		t.Errorf("expected lowercased, got %v", result)
-	}
-}
-
-func TestStrListDefaultEmptyEntriesFiltered(t *testing.T) {
-	data := map[string]map[string]string{"s": {"k": "a,,b,"}}
-	result := strListDefault(data, "s", "k", "default")
-	if len(result) != 2 {
-		t.Fatalf("expected 2 items (empty entries filtered), got %d: %v", len(result), result)
-	}
-	if result[0] != "a" || result[1] != "b" {
-		t.Errorf("expected [a b], got %v", result)
-	}
-}
-
-func TestStrListDefaultFallbackSplit(t *testing.T) {
-	data := map[string]map[string]string{"s": {}}
-	result := strListDefault(data, "s", "missing", "curl,wget,ssh")
-	if len(result) != 3 {
-		t.Fatalf("expected 3 from fallback split, got %d", len(result))
-	}
-	if result[0] != "curl" || result[1] != "wget" || result[2] != "ssh" {
-		t.Errorf("expected [curl wget ssh], got %v", result)
-	}
-}
-
-func TestStrListDefaultMissingSectionFallback(t *testing.T) {
-	result := strListDefault(nil, "missing", "key", "a,b")
-	if len(result) != 2 || result[0] != "a" || result[1] != "b" {
-		t.Errorf("expected fallback split [a b], got %v", result)
 	}
 }
 
@@ -1358,5 +1294,112 @@ func validBaseConfig() *Config {
 		Queue:   QueueConfig{MaxDepth: 64},
 		Logging: LoggingConfig{Level: "info"},
 		Bash:    BashConfig{Timeout: 60 * time.Second, MaxOutput: 30720},
+	}
+}
+
+func TestStrListDefault(t *testing.T) {
+	tests := []struct {
+		name       string
+		data       map[string]map[string]string
+		section    string
+		key        string
+		defaultVal string
+		want       []string
+	}{
+		{
+			name:       "empty default returns empty slice",
+			data:       nil,
+			section:    "tools.bash",
+			key:        "banned",
+			defaultVal: "",
+			want:       nil,
+		},
+		{
+			name:       "single item",
+			data:       map[string]map[string]string{"s": {"k": "foo"}},
+			section:    "s",
+			key:        "k",
+			defaultVal: "bar",
+			want:       []string{"foo"},
+		},
+		{
+			name:       "comma-separated with whitespace trimmed and lowercased",
+			data:       map[string]map[string]string{"s": {"k": " Foo , Bar , BAZ "}},
+			section:    "s",
+			key:        "k",
+			defaultVal: "",
+			want:       []string{"foo", "bar", "baz"},
+		},
+		{
+			name:       "mixed case lowercased",
+			data:       map[string]map[string]string{"s": {"k": "ABC"}},
+			section:    "s",
+			key:        "k",
+			defaultVal: "",
+			want:       []string{"abc"},
+		},
+		{
+			name:       "empty entries filtered out",
+			data:       map[string]map[string]string{"s": {"k": "foo,,bar"}},
+			section:    "s",
+			key:        "k",
+			defaultVal: "",
+			want:       []string{"foo", "bar"},
+		},
+		{
+			name:       "missing section falls back to split default",
+			data:       nil,
+			section:    "tools.bash",
+			key:        "banned",
+			defaultVal: "curl,wget",
+			want:       []string{"curl", "wget"},
+		},
+		{
+			name:       "missing key falls back to split default",
+			data:       map[string]map[string]string{"s": {"other": "value"}},
+			section:    "s",
+			key:        "k",
+			defaultVal: "a,b,c",
+			want:       []string{"a", "b", "c"},
+		},
+		{
+			name:       "default with empty entries filtered",
+			data:       nil,
+			section:    "s",
+			key:        "k",
+			defaultVal: "foo,,bar,,",
+			want:       []string{"foo", "bar"},
+		},
+		{
+			name:       "default with whitespace in entries trimmed and lowercased",
+			data:       nil,
+			section:    "s",
+			key:        "k",
+			defaultVal: " FoO ,  BAr  ",
+			want:       []string{"foo", "bar"},
+		},
+		{
+			name:       "nil section with empty default returns nil",
+			data:       nil,
+			section:    "s",
+			key:        "k",
+			defaultVal: "",
+			want:       nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := strListDefault(tt.data, tt.section, tt.key, tt.defaultVal)
+			if len(got) == 0 && len(tt.want) == 0 {
+				if (got == nil) != (tt.want == nil) {
+					t.Errorf("got %v (%v), want %v (%v)", got, got == nil, tt.want, tt.want == nil)
+				}
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

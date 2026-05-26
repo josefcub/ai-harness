@@ -4,15 +4,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ---
 
-## config/config.go
-
-
-- [ ] `config.go:178-237` helper functions.
-  - It contains the following behaviors, each one of which needs to be tested:
-    - [ ] `strListDefault()`: empty default, single item, comma-separated with whitespace, mixed case lowercasing, empty entries filtered out, missing section/key falls back to split default
-
----
-
 ## config/config_test.go
 
 - [ ] `TestLoadFullConfig` — missing assertions:
