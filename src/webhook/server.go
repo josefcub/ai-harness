@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +28,7 @@ type Server struct {
 	logger       *log.Logger
 
 	server   *http.Server
+	serverMu sync.RWMutex
 	shutting atomic.Bool
 }
 
@@ -50,33 +52,38 @@ func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc(s.webhookPath, s.handleWebhook)
 
-	s.server = &http.Server{
+	srv := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", s.host, s.port),
 		Handler: mux,
 	}
 
+	s.serverMu.Lock()
+	s.server = srv
+	s.serverMu.Unlock()
+
 	logger := s.logger
 
-	ln, err := net.Listen("tcp", s.server.Addr)
+	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
 
 	if logger != nil {
-		logger.Info("webhook server listening", "addr", s.server.Addr)
+		logger.Info("webhook server listening", "addr", srv.Addr)
 	}
 
 	// Start serving in background
 	go func() {
-		if err := s.server.Serve(ln); err != nil && err != http.ErrServerClosed {
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			if logger != nil {
 				logger.Error("webhook server error", "error", err.Error())
 			}
 		}
 	}()
 
-	// Block until context is done
+	// Block until context is done, then shut down the HTTP server
 	<-ctx.Done()
+	srv.Shutdown(context.Background())
 	return nil
 }
 
@@ -89,8 +96,11 @@ func (s *Server) HandleFunc() http.HandlerFunc {
 // Stop gracefully shuts down the HTTP server.
 func (s *Server) Stop() error {
 	s.shutting.Store(true)
-	if s.server != nil {
-		return s.server.Shutdown(context.Background())
+	s.serverMu.RLock()
+	srv := s.server
+	s.serverMu.RUnlock()
+	if srv != nil {
+		return srv.Shutdown(context.Background())
 	}
 	return nil
 }
