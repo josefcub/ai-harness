@@ -4,28 +4,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ---
 
-## main_test.go
-
-- [ ] `main_test.go` — missing behavioral tests:
-  - [ ] Full `main()` execution with real signal (process-level)
-  - [ ] Webhook 503 behavior after `ws.Stop()` (current test only checks Stop idempotency)
-  - [ ] Config validation failure for each individual missing field
-  - [ ] Worker cancellation mid-LLM-call (context cancelled during processing)
-  - [ ] Tool registration completeness (all 4 Register*Tools calls verified)
-  - [ ] Graceful shutdown with worker actively processing a message
-
-- [ ] `main_test.go:77-196` `TestIntegration_GracefulShutdown`:
-  - [ ] Dead variable: `workingDir` assigned then `_ = workingDir` — cleanup
-
-- [ ] `main_test.go:1000-1013` `TestIntegration_SignalNotify`:
-  - [ ] Trivial test: only verifies `signal.Notify` doesn't immediately deliver a signal — tests stdlib, not application behavior. Should be removed.
-
-- [ ] `main_test.go:361-440` `TestIntegration_WebhookServer`:
-  - [ ] Unused httptest server: `ts` created then assigned to `_` — never tests a webhook server
-  - [ ] Magic string comparison: checking for two typo variants of rejection message is a code smell
-
----
-
 ## config/config.go
 
 - [ ] `config.go:112` `Load()` — Bash.Banned default is a 60+ token inline comma-separated list.

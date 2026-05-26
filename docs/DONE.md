@@ -122,6 +122,10 @@ That's not a constructor — it's a configuration object masquerading as a param
 
 ---
 
-ß
+## main_test.go
+
+Refactored entirely instead of doing the thing.  Ugh.
+
+
 
 
