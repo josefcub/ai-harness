@@ -1,4 +1,4 @@
-module github.com/agent-project/harness
+module github.com/josefcub/substrate
 
 go 1.26
 
