@@ -4,27 +4,6 @@ Generated per TESTING.md and NEW_STANDARDS.md standards. Each entry lists missin
 
 ---
 
-## config/config_test.go
-
-- [ ] `TestLoadFullConfig` — missing assertions:
-  - [ ] `cfg.Bash.Enabled`, `cfg.Bash.Timeout`, `cfg.Bash.MaxOutput`, `cfg.Bash.Banned`
-  - [ ] `cfg.Paths.ChannelLogDir`
-
-- [ ] `TestLoadDefaults` — missing assertions:
-  - [ ] `cfg.Paths.ChannelLogDir`, `cfg.Bash.Enabled`, `cfg.Bash.Timeout`, `cfg.Bash.MaxOutput`, `cfg.Bash.Banned`
-  - [ ] `cfg.LLM.SummarizeThreshold`, `cfg.LLM.SummarizeKeepRecent`
-
-- [ ] Missing validation tests:
-  - [ ] `llm.max_tokens <= 0`
-  - [ ] `llm.timeout <= 0`
-  - [ ] `llm.max_tool_iterations <= 0`
-  - [ ] `tools.bash.timeout <= 0`
-  - [ ] `tools.bash.max_output <= 0`
-  - [ ] `server.port = 0` (lower boundary)
-  - [ ] `summarize_threshold = 0` (lower boundary)
-
----
-
 ## config/ini_parser.go
 
 - [ ] `ini_parser.go:12-113` `Parse()` — 102 lines, handles 6 distinct responsibilities in one loop.

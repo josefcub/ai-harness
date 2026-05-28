@@ -138,6 +138,33 @@ Refactored entirely instead of doing the thing.  Ugh.
   - Code quality issues:
     - [x] Violates SRP — should split into `validateLLM()`, `validateServer()`, `validateQueue()`, `validateLogging()`, `validateBash()` sub-methods for testability and maintainability
 
+- [x] `config.go:178-237` helper functions.
+  - It contains the following behaviors, each one of which needs to be tested:
+    - [x] `strListDefault()`: empty default, single item, comma-separated with whitespace, mixed case lowercasing, empty entries filtered out, missing section/key falls back to split default
+
+---
+
+## config/config_test.go
+
+- [x] `TestLoadFullConfig` — missing assertions:
+  - [x] `cfg.Bash.Enabled`, `cfg.Bash.Timeout`, `cfg.Bash.MaxOutput`, `cfg.Bash.Banned`
+  - [x] `cfg.Paths.ChannelLogDir`
+
+- [x] `TestLoadDefaults` — missing assertions:
+  - [x] `cfg.Paths.ChannelLogDir`, `cfg.Bash.Enabled`, `cfg.Bash.Timeout`, `cfg.Bash.MaxOutput`, `cfg.Bash.Banned`
+  - [x] `cfg.LLM.SummarizeThreshold`, `cfg.LLM.SummarizeKeepRecent`
+
+- [x] Missing validation tests:
+  - [x] `llm.max_tokens <= 0`
+  - [x] `llm.timeout <= 0`
+  - [x] `llm.max_tool_iterations <= 0`
+  - [x] `tools.bash.timeout <= 0`
+  - [x] `tools.bash.max_output <= 0`
+  - [x] `server.port = 0` (lower boundary)
+  - [x] `summarize_threshold = 0` (lower boundary)
+
+---
+
 
 
 
