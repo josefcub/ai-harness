@@ -10,7 +10,7 @@ _RUN_TEST = mkdir -p test-output && cd $(SRC) && go test -v -count=1 -run=$(Test
 all: build client
 
 build:
-	cd $(SRC) && go build -o ../$(BIN)/runtime .
+	cd $(SRC) && go build -o ../$(BIN)/substrate .
 
 client:
 	cd $(SRC) && go build -o ../$(BIN)/client ./cmd/client
@@ -33,7 +33,7 @@ fmt:
 	fi
 
 clean:
-	rm -f $(BIN)/runtime && rm -f $(BIN)/client && cd $(SRC) && go clean . && go clean ./cmd/client && go clean -cache 
+	rm -f $(BIN)/substrate && rm -f $(BIN)/client && cd $(SRC) && go clean . && go clean ./cmd/client && go clean -cache 
 
 test-one:
 	${_RUN_TEST}

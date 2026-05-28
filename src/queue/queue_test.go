@@ -255,7 +255,7 @@ func TestRejectionLogsWarning(t *testing.T) {
 	_, _ = q.Enqueue(Message{ChannelID: "warn:ch", MessageText: "2"})
 
 	// Read log file
-	data, err := os.ReadFile(filepath.Join(tmpDir, "harness.log"))
+	data, err := os.ReadFile(filepath.Join(tmpDir, "substrate.log"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,8 +26,8 @@ func TestNewLogger(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir() error = %v", err)
 	}
-	if len(files) != 1 || files[0].Name() != "harness.log" {
-		t.Errorf("expected harness.log file, got %v", files)
+	if len(files) != 1 || files[0].Name() != "substrate.log" {
+		t.Errorf("expected substrate.log file, got %v", files)
 	}
 }
 
@@ -42,7 +42,7 @@ func TestLoggerInfo(t *testing.T) {
 
 	l.Info("hello, world", "channel", "test:123")
 
-	data, err := os.ReadFile(filepath.Join(dir, "harness.log"))
+	data, err := os.ReadFile(filepath.Join(dir, "substrate.log"))
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
@@ -85,7 +85,7 @@ func TestLoggerLevelsFilter(t *testing.T) {
 	l.Warn("warn message")
 	l.Error("error message")
 
-	data, err := os.ReadFile(filepath.Join(dir, "harness.log"))
+	data, err := os.ReadFile(filepath.Join(dir, "substrate.log"))
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
@@ -123,7 +123,7 @@ func TestLoggerDebugLevel(t *testing.T) {
 	l.Warn("warn message")
 	l.Error("error message")
 
-	data, err := os.ReadFile(filepath.Join(dir, "harness.log"))
+	data, err := os.ReadFile(filepath.Join(dir, "substrate.log"))
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
@@ -152,7 +152,7 @@ func TestLoggerErrorLevelOnly(t *testing.T) {
 	l.Warn("warn message")
 	l.Error("error message")
 
-	data, err := os.ReadFile(filepath.Join(dir, "harness.log"))
+	data, err := os.ReadFile(filepath.Join(dir, "substrate.log"))
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
@@ -186,7 +186,7 @@ func TestLoggerWithSource(t *testing.T) {
 	srcLogger := l.WithSource("plugin.webhook")
 	srcLogger.Info("webhook message received", "channel", "slack:abc123")
 
-	data, err := os.ReadFile(filepath.Join(dir, "harness.log"))
+	data, err := os.ReadFile(filepath.Join(dir, "substrate.log"))
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
@@ -209,7 +209,7 @@ func TestLoggerMultipleKVs(t *testing.T) {
 
 	l.Info("test", "key1", "val1", "key2", "val2", "key3", "val3")
 
-	data, err := os.ReadFile(filepath.Join(dir, "harness.log"))
+	data, err := os.ReadFile(filepath.Join(dir, "substrate.log"))
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
@@ -234,7 +234,7 @@ func TestLoggerNoKVs(t *testing.T) {
 
 	l.Info("simple message")
 
-	data, err := os.ReadFile(filepath.Join(dir, "harness.log"))
+	data, err := os.ReadFile(filepath.Join(dir, "substrate.log"))
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
@@ -310,7 +310,7 @@ func TestLoggerAppendMode(t *testing.T) {
 
 	l2.Info("fourth message")
 
-	data, err := os.ReadFile(filepath.Join(dir, "harness.log"))
+	data, err := os.ReadFile(filepath.Join(dir, "substrate.log"))
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}

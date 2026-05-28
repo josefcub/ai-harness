@@ -626,7 +626,7 @@ func TestChatChunkParseErrorWarning(t *testing.T) {
 	}
 
 	// Verify a warning was logged for the malformed chunk
-	logFile, err := os.ReadFile(filepath.Join(tmpDir, "harness.log"))
+	logFile, err := os.ReadFile(filepath.Join(tmpDir, "substrate.log"))
 	if err != nil {
 		t.Fatalf("read log file: %v", err)
 	}

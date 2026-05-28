@@ -7,14 +7,14 @@
 ## Build
 
 ```bash
-make build        # → bin/runtime
+make build        # → bin/substrate
 make client       # → bin/client
 ```
 
 Or manually:
 
 ```bash
-cd src && go build -o ../bin/runtime .
+cd src && go build -o ../bin/substrate .
 cd src && go build -o ../bin/client ./cmd/client
 ```
 
@@ -41,7 +41,7 @@ Key settings in `config.ini`:
 ## Run
 
 ```bash
-./bin/runtime -config config.ini
+./bin/substrate -config config.ini
 ```
 
 The server starts listening on the configured host:port. Log output goes to the configured `log_dir`.

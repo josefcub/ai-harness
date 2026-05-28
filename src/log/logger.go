@@ -69,7 +69,7 @@ func New(logDir string, level Level) (*Logger, error) {
 		return nil, fmt.Errorf("create log dir: %w", err)
 	}
 
-	f, err := os.OpenFile(filepath.Join(logDir, "harness.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(filepath.Join(logDir, "substrate.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("open log file: %w", err)
 	}

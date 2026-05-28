@@ -32,7 +32,7 @@ Messages arrive over a webhook, get queued FIFO, and are processed one at a time
 
 ```bash
 # Build
-make build        # → bin/harness
+make build        # → bin/substrate
 make client       # → bin/client
 
 # Configure
@@ -40,7 +40,7 @@ cp config.ini-example config.ini
 # Edit config.ini with your LLM endpoint, model, and paths
 
 # Run
-./bin/runtime -config config.ini
+./bin/substrate -config config.ini
 
 # Send a message
 echo "Hello" | ./bin/client -n "greeting-channel" "Hello there."
