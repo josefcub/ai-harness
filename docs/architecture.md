@@ -120,7 +120,7 @@ Key types: `ChatClient`, `Chat()`, `ChatStream()`
 
 | File | Purpose |
 |---|---|
-| `client.go` | Sends messages to the harness webhook, optionally waits for callback response |
+| `client.go` | Sends messages to the substrate webhook, optionally waits for callback response |
 
 ### `src/cmd/tools/coverage/` — coverage viewer
 

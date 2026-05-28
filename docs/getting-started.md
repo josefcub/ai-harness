@@ -96,7 +96,7 @@ make test-one Test=TestSaveLoadRoundtrip
 
 ## Module paths
 
-All Go packages are under `github.com/agent-project/harness`:
+All Go packages are under `github.com/josefcub/substrate`:
 
 | Local path | Import path |
 |---|---|

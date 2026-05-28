@@ -125,7 +125,7 @@ func main() {
 		wrk.Run(ctx)
 	}()
 
-	logger.Info("agent harness starting",
+	logger.Info("agent substrate starting",
 		"endpoint", cfg.LLM.Endpoint,
 		"model", cfg.LLM.Model,
 		"host", cfg.Server.Host,
