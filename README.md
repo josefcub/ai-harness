@@ -1,8 +1,8 @@
-# ai-runtime
+# substrate
 
 > **Cogito ergo SIGSEGV**
 
-A minimalist, local-first autonomous agent runtime written in Go — stdlib only, zero external dependencies.
+A minimalist, local-first autonomous agent substrate written in Go — stdlib only, zero external dependencies.
 
 Still under construction.
 
