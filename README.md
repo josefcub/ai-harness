@@ -43,7 +43,7 @@ cp config.ini-example config.ini
 ./bin/substrate -config config.ini
 
 # Send a message
-echo "Hello" | ./bin/client -n "greeting-channel" "Hello there."
+./bin/client -c config.ini -n "greeting-channel" "Hello there."
 ```
 
 ## Architecture

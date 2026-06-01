@@ -116,7 +116,7 @@ Key types: `ChatClient`, `Chat()`, `ChatStream()`
 | `client.go` | `MockClient` — queue responses/errors for unit tests against `agent` or `llm` code |
 | `server.go` | `Server` — in-memory mock LLM HTTP server for integration tests |
 
-### `src/cmd/client/` — CLI test client
+### `src/cmd/cli-client/` — CLI test client
 
 | File | Purpose |
 |---|---|

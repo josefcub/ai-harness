@@ -5,15 +5,18 @@ Package := ./...
 
 _RUN_TEST = mkdir -p test-output && cd $(SRC) && go test -v -count=1 -run=$(Test) $(Package) -coverprofile=../test-output/single-$(Test).cover.out
 
-.PHONY: all build client test vet race fmt clean test-one coverage-one
+.PHONY: all build oai-client cli-client test vet race fmt clean test-one coverage-one
 
-all: build client
+all: build cli-client oai-client
 
 build:
 	cd $(SRC) && go build -o ../$(BIN)/substrate .
 
-client:
-	cd $(SRC) && go build -o ../$(BIN)/client ./cmd/client
+cli-client:
+	cd $(SRC) && go build -o ../$(BIN)/cli-client ./cmd/cli-client
+
+oai-client:
+	cd $(SRC) && go build -o ../$(BIN)/oai-client ./cmd/oai-client
 
 test: vet
 	cd $(SRC) && go test -count=1 ./...
@@ -33,7 +36,7 @@ fmt:
 	fi
 
 clean:
-	rm -f $(BIN)/substrate && rm -f $(BIN)/client && cd $(SRC) && go clean . && go clean ./cmd/client && go clean -cache 
+	rm -f $(BIN)/substrate $(BIN)/cli-client $(BIN)/oai-client && cd $(SRC) && go clean . && go clean ./cmd/cli-client && go clean ./cmd/oai-client && go clean -cache 
 
 test-one:
 	${_RUN_TEST}
