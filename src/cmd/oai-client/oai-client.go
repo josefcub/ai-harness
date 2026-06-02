@@ -59,10 +59,10 @@ type Delta struct {
 // ---------- Substrate Types ----------
 
 type SubstrateRequest struct {
-	Channel         string                 `json:"channel"`
-	Message         string                 `json:"message"`
-	CallbackURL     string                 `json:"callback_url,omitempty"`
-	ImageAttachment *ImageAttachment       `json:"image_attachment,omitempty"`
+	Channel         string           `json:"channel"`
+	Message         string           `json:"message"`
+	CallbackURL     string           `json:"callback_url,omitempty"`
+	ImageAttachment *ImageAttachment `json:"image_attachment,omitempty"`
 }
 
 type ImageAttachment struct {
@@ -71,8 +71,8 @@ type ImageAttachment struct {
 }
 
 type SubstrateCallback struct {
-	Channel string `json:"channel"`
-	Message string `json:"message"`
+	Channel   string `json:"channel"`
+	Message   string `json:"message"`
 	Reasoning string `json:"reasoning,omitempty"`
 }
 
